@@ -178,8 +178,8 @@ class _IncognitoScreenState extends State<IncognitoScreen> with TickerProviderSt
               children: [
                 const Icon(Icons.visibility_off_rounded, color: AppTheme.accentGrey, size: 20),
                 const SizedBox(width: 8),
-                Text("INCOGNITO", style: GoogleFonts.orbitron(
-                    fontWeight: FontWeight.w700,
+                Text("INCOGNITO", style: GoogleFonts.tinos(
+                    fontWeight: FontWeight.bold,
                     fontSize: 16,
                     color: AppTheme.primaryWhite,
                     letterSpacing: 2.0
@@ -218,7 +218,7 @@ class _IncognitoScreenState extends State<IncognitoScreen> with TickerProviderSt
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: Colors.white10),
             ),
-            child: Text("Secure Session", style: GoogleFonts.outfit(color: Colors.white54, fontSize: 12)),
+            child: Text("Secure Session", style: GoogleFonts.tinos(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.bold)),
           ),
         ),
         const SizedBox(height: 20),
@@ -232,7 +232,7 @@ class _IncognitoScreenState extends State<IncognitoScreen> with TickerProviderSt
             const SizedBox(width: 12),
             TypingText(
               text: "[ Gone Incognito ]",
-              style: GoogleFonts.orbitron(
+              style: GoogleFonts.tinos(
                 color: const Color(0xFFE8E8E8),
                 fontSize: 28,
                 fontWeight: FontWeight.bold,
@@ -246,9 +246,10 @@ class _IncognitoScreenState extends State<IncognitoScreen> with TickerProviderSt
           constraints: const BoxConstraints(maxWidth: 320),
           child: TypingText(
             text: "Ephemeral mode active. Conversations are end-to-end encrypted and will be purged upon exit.",
-            style: GoogleFonts.outfit(
+            style: GoogleFonts.tinos(
               color: AppTheme.textSecondary,
               fontSize: 14,
+              fontWeight: FontWeight.bold,
               height: 1.6,
             ),
             typingSpeed: const Duration(milliseconds: 25),
@@ -293,8 +294,8 @@ class _IncognitoScreenState extends State<IncognitoScreen> with TickerProviderSt
               children: [
                 Text(
                     msg.isUser ? "USER_GHOST" : msg.modelName.toUpperCase(),
-                    style: GoogleFonts.jetBrainsMono(
-                        fontWeight: FontWeight.w600,
+                    style: GoogleFonts.tinos(
+                        fontWeight: FontWeight.bold,
                         fontSize: 10,
                         color: AppTheme.textSecondary,
                         letterSpacing: 1.2
@@ -305,19 +306,20 @@ class _IncognitoScreenState extends State<IncognitoScreen> with TickerProviderSt
                   data: msg.text,
                   selectable: true,
                   styleSheet: MarkdownStyleSheet(
-                    p: GoogleFonts.outfit(fontSize: 16, height: 1.6, color: AppTheme.textPrimary),
-                    h1: GoogleFonts.orbitron(color: AppTheme.primaryWhite, fontSize: 20, fontWeight: FontWeight.bold),
-                    code: GoogleFonts.jetBrainsMono(
+                    p: GoogleFonts.tinos(fontSize: 16, fontWeight: FontWeight.bold, height: 1.6, color: AppTheme.textPrimary),
+                    h1: GoogleFonts.tinos(color: AppTheme.primaryWhite, fontSize: 20, fontWeight: FontWeight.bold),
+                    code: GoogleFonts.tinos(
                       backgroundColor: AppTheme.surfaceMedium,
                       color: AppTheme.accentGrey,
                       fontSize: 14,
+                      fontWeight: FontWeight.bold,
                     ),
                     codeblockDecoration: BoxDecoration(
                         color: AppTheme.surfaceMedium,
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(color: Colors.white10)
                     ),
-                    blockquote: GoogleFonts.outfit(color: Colors.white60, fontStyle: FontStyle.italic),
+                    blockquote: GoogleFonts.tinos(color: Colors.white60, fontStyle: FontStyle.italic, fontWeight: FontWeight.bold),
                     blockquoteDecoration: const BoxDecoration(
                         border: Border(left: BorderSide(color: AppTheme.accentGrey, width: 3))
                     ),
@@ -371,10 +373,10 @@ class _IncognitoScreenState extends State<IncognitoScreen> with TickerProviderSt
               focusNode: _inputFocus,
               maxLines: 4,
               minLines: 1,
-              style: GoogleFonts.outfit(color: Colors.white, fontSize: 16),
+              style: GoogleFonts.tinos(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
               decoration: InputDecoration(
                 hintText: "Transmit encrypted message...",
-                hintStyle: GoogleFonts.outfit(color: Colors.white38, fontSize: 16),
+                hintStyle: GoogleFonts.tinos(color: Colors.white38, fontSize: 16, fontWeight: FontWeight.bold),
                 border: InputBorder.none,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
               ),
@@ -479,10 +481,10 @@ class _SuggestionPillState extends State<_SuggestionPill> {
         ),
         child: AnimatedDefaultTextStyle(
           duration: const Duration(milliseconds: 200),
-          style: GoogleFonts.outfit(
+          style: GoogleFonts.tinos(
             color: _isHovered ? Colors.white : Colors.white70,
             fontSize: 13,
-            fontWeight: FontWeight.w500,
+            fontWeight: FontWeight.bold,
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
