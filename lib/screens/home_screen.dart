@@ -249,8 +249,8 @@ class _DashboardTabState extends State<DashboardTab>
                         text: "< Welcome to QUANTMESSAGE >",
                         // MODIFIED SECTION BELOW
                         style: GoogleFonts.tinos(
-                          fontSize: 42,
-                          fontWeight: FontWeight.bold,
+                          fontSize: 45,
+                          fontWeight: FontWeight.w900,
                           color: Colors.white,
                           letterSpacing: 1.2,
                         ),
