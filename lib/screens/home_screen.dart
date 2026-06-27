@@ -9,7 +9,7 @@ import 'app_bar.dart';
 import 'chat_screen.dart';
 import 'history_screen.dart';
 import 'incogonito_screen.dart';
-import 'incogonito_screen.dart';
+// import 'incogonito_screen.dart'; // Removed duplicate import
 import 'signin_screen.dart';
 import 'signup_screen.dart';
 import 'settings_screen.dart';
@@ -247,7 +247,13 @@ class _DashboardTabState extends State<DashboardTab>
                       child: _ShimmerText(
                         controller: _shimmerCtrl,
                         text: "< Welcome to QUANTMESSAGE >",
-                        style: GoogleFonts.orbitron(fontSize: 34, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 2),
+                        // MODIFIED SECTION BELOW
+                        style: GoogleFonts.tinos(
+                          fontSize: 42,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          letterSpacing: 1.2,
+                        ),
                       ),
                     ),
                   ),
