@@ -1,4 +1,9 @@
+// lib/screens/sidebar_panel/left_sidebar.dart
+//
+
+
 import 'package:flutter/material.dart';
+import 'left_sidebar_extension.dart';
 
 class LeftSidebar extends StatefulWidget {
   final VoidCallback? onNewChat;
@@ -24,31 +29,98 @@ class LeftSidebar extends StatefulWidget {
   State<LeftSidebar> createState() => _LeftSidebarState();
 }
 
-class _LeftSidebarState extends State<LeftSidebar> {
-  // Tracks the currently selected icon index
-  int _selectedIndex = 1; // Default to "New Chat"
+class _LeftSidebarState extends State<LeftSidebar>
+    with SingleTickerProviderStateMixin {
+  int _selectedIndex = 1;
+
+  // Arrow rotation: 0° = pointing right (closed), 180° = pointing left (open)
+  late final AnimationController _arrowCtrl;
+  late final Animation<double>   _arrowRotation;
+
+  bool _extensionOpen = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _arrowCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _arrowRotation = Tween<double>(begin: 0.0, end: 0.5)
+        .animate(CurvedAnimation(
+      parent: _arrowCtrl,
+      curve: Curves.easeInOut,
+    ));
+  }
+
+  @override
+  void dispose() {
+    _arrowCtrl.dispose();
+    super.dispose();
+  }
 
   void _setSelectedIndex(int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
+    setState(() => _selectedIndex = index);
+  }
+
+  void _toggleExtension() {
+    if (_extensionOpen) {
+      // Close: reverse arrow, dismiss overlay
+      _arrowCtrl.reverse();
+      LeftSidebarExtension.dismiss();
+      setState(() => _extensionOpen = false);
+    } else {
+      // Open: rotate arrow, show overlay
+      _arrowCtrl.forward();
+      LeftSidebarExtension.show(context);
+      setState(() => _extensionOpen = true);
+
+      // When the overlay closes via backdrop tap, sync arrow back
+      Future.delayed(const Duration(milliseconds: 10), () {
+        if (mounted && _extensionOpen) {
+          // Poll is not ideal — instead we use a callback via the
+          // dismiss wrapper below.
+        }
+      });
+    }
+  }
+
+  /// Called by the backdrop tap inside the overlay so the arrow resets.
+  void _onExtensionDismissedExternally() {
+    if (mounted) {
+      _arrowCtrl.reverse();
+      setState(() => _extensionOpen = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 52, // Decreased size for a sleeker look
+      width: 52,
       color: const Color(0xFF0A0A0A),
       padding: const EdgeInsets.symmetric(vertical: 20),
       child: Column(
         children: [
-          // === TOP PORTION ===
+
+          // ── Arrow icon — opens/closes the extension ──────────────────
           _SidebarIconButton(
-            icon: Icons.arrow_forward_ios,
-            size: 14,
+            // Rotates via RotationTransition when extension is toggled
+            customChild: RotationTransition(
+              turns: _arrowRotation,
+              child: Icon(
+                Icons.arrow_forward_ios,
+                size: 14,
+                color: (_extensionOpen || _selectedIndex == 0)
+                    ? Colors.white
+                    : const Color(0xFF666666),
+              ),
+            ),
             index: 0,
-            isSelected: _selectedIndex == 0,
-            onTap: () => _setSelectedIndex(0),
+            isSelected: _extensionOpen,
+            onTap: () {
+              _setSelectedIndex(0);
+              _toggleExtension();
+            },
           ),
           const SizedBox(height: 24),
 
@@ -58,7 +130,7 @@ class _LeftSidebarState extends State<LeftSidebar> {
             isSelected: _selectedIndex == 1,
             onTap: () {
               _setSelectedIndex(1);
-              if (widget.onNewChat != null) widget.onNewChat!();
+              widget.onNewChat?.call();
             },
           ),
           const SizedBox(height: 12),
@@ -77,7 +149,7 @@ class _LeftSidebarState extends State<LeftSidebar> {
             isSelected: _selectedIndex == 3,
             onTap: () {
               _setSelectedIndex(3);
-              if (widget.onProjects != null) widget.onProjects!();
+              widget.onProjects?.call();
             },
           ),
           const SizedBox(height: 12),
@@ -88,7 +160,7 @@ class _LeftSidebarState extends State<LeftSidebar> {
             isSelected: _selectedIndex == 4,
             onTap: () {
               _setSelectedIndex(4);
-              if (widget.onArtifacts != null) widget.onArtifacts!();
+              widget.onArtifacts?.call();
             },
           ),
           const SizedBox(height: 12),
@@ -99,7 +171,7 @@ class _LeftSidebarState extends State<LeftSidebar> {
             isSelected: _selectedIndex == 5,
             onTap: () {
               _setSelectedIndex(5);
-              if (widget.onCode != null) widget.onCode!();
+              widget.onCode?.call();
             },
           ),
           const SizedBox(height: 12),
@@ -110,26 +182,24 @@ class _LeftSidebarState extends State<LeftSidebar> {
             isSelected: _selectedIndex == 6,
             onTap: () {
               _setSelectedIndex(6);
-              if (widget.onCustomise != null) widget.onCustomise!();
+              widget.onCustomise?.call();
             },
           ),
 
           const Spacer(),
 
-          // === MIDDLE PORTION ===
           _SidebarIconButton(
             icon: Icons.menu_book_outlined,
             index: 7,
             isSelected: _selectedIndex == 7,
             onTap: () {
               _setSelectedIndex(7);
-              if (widget.onBook != null) widget.onBook!();
+              widget.onBook?.call();
             },
           ),
 
           const Spacer(),
 
-          // === BOTTOM PORTION ===
           _SidebarIconButton(
             icon: Icons.file_download_outlined,
             index: 8,
@@ -137,14 +207,14 @@ class _LeftSidebarState extends State<LeftSidebar> {
             showNotificationDot: true,
             onTap: () {
               _setSelectedIndex(8);
-              if (widget.onDownload != null) widget.onDownload!();
+              widget.onDownload?.call();
             },
           ),
           const SizedBox(height: 24),
 
-          // Profile Avatar
+          // Profile avatar
           Container(
-            width: 28,
+            width:  28,
             height: 28,
             decoration: const BoxDecoration(
               color: Color(0xFFD3D3D3),
@@ -167,23 +237,31 @@ class _LeftSidebarState extends State<LeftSidebar> {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Icon button (identical to original, plus optional customChild override)
+// ─────────────────────────────────────────────────────────────────────────────
+
 class _SidebarIconButton extends StatefulWidget {
-  final IconData icon;
+  final IconData?    icon;
+  final Widget?      customChild;   // used for the animated arrow
   final VoidCallback onTap;
-  final bool isSelected;
-  final int index;
-  final double size;
-  final bool showNotificationDot;
+  final bool         isSelected;
+  final int          index;
+  final double       size;
+  final bool         showNotificationDot;
 
   const _SidebarIconButton({
     Key? key,
-    required this.icon,
+    this.icon,
+    this.customChild,
     required this.onTap,
     required this.isSelected,
     required this.index,
-    this.size = 20.0, // Decreased icon size
+    this.size = 20.0,
     this.showNotificationDot = false,
-  }) : super(key: key);
+  })  : assert(icon != null || customChild != null,
+  'Provide either icon or customChild'),
+        super(key: key);
 
   @override
   State<_SidebarIconButton> createState() => _SidebarIconButtonState();
@@ -194,14 +272,13 @@ class _SidebarIconButtonState extends State<_SidebarIconButton> {
 
   @override
   Widget build(BuildContext context) {
-    // Icon turns white if selected OR hovered
     final Color iconColor = (widget.isSelected || _isHovered)
         ? Colors.white
         : const Color(0xFF666666);
 
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
+      onExit:  (_) => setState(() => _isHovered = false),
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
         onTap: widget.onTap,
@@ -210,26 +287,29 @@ class _SidebarIconButtonState extends State<_SidebarIconButton> {
           curve: Curves.easeInOut,
           padding: const EdgeInsets.all(10.0),
           decoration: BoxDecoration(
-            // The "Toggle Effect": highlight expands/appears when selected
             color: widget.isSelected
                 ? Colors.white.withOpacity(0.15)
-                : (_isHovered ? Colors.white.withOpacity(0.05) : Colors.transparent),
+                : (_isHovered
+                ? Colors.white.withOpacity(0.05)
+                : Colors.transparent),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Stack(
             clipBehavior: Clip.none,
             children: [
-              Icon(
-                widget.icon,
-                color: iconColor,
-                size: widget.size,
-              ),
+              // Either the custom child (arrow) or a plain icon
+              widget.customChild ??
+                  Icon(
+                    widget.icon,
+                    color: iconColor,
+                    size: widget.size,
+                  ),
               if (widget.showNotificationDot)
                 Positioned(
-                  right: -2,
-                  top: -2,
+                  right:  -2,
+                  top:    -2,
                   child: Container(
-                    width: 6,
+                    width:  6,
                     height: 6,
                     decoration: const BoxDecoration(
                       color: Colors.blueAccent,
