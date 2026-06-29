@@ -1,7 +1,4 @@
-
 // lib/screens/sidebar_panel/left_sidebar_extension.dart
-//
-
 
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -67,32 +64,27 @@ class _SidebarExtensionOverlayState
     super.initState();
     _ctrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 380),
+      duration: const Duration(milliseconds: 320), // ← slightly faster, smoother
     );
 
-    // Spring-like overshoot for the panel slide
-    final springCurve = CurvedAnimation(
+    // Smooth ease-out cubic — no overshoot bounce (cleaner, more professional)
+    final easeCurve = CurvedAnimation(
       parent: _ctrl,
-      curve: const _SpringCurve(),
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
     );
 
     _slide = Tween<Offset>(
-      begin: const Offset(-1.0, 0.0), // starts fully off-screen to the left
+      begin: const Offset(-1.0, 0.0),
       end: Offset.zero,
-    ).animate(springCurve);
-
-    final easeCurve = CurvedAnimation(
-      parent: _ctrl,
-      curve: Curves.easeOut,
-    );
+    ).animate(easeCurve);
 
     _backdropOpacity = Tween<double>(begin: 0.0, end: 1.0)
         .animate(easeCurve);
 
-    _blurAmount = Tween<double>(begin: 0.0, end: 6.0)
+    _blurAmount = Tween<double>(begin: 0.0, end: 8.0)
         .animate(easeCurve);
 
-    // Auto-play open animation
     _ctrl.forward();
   }
 
@@ -103,7 +95,9 @@ class _SidebarExtensionOverlayState
   }
 
   Future<void> _close() async {
+    if (!mounted) return;
     await _ctrl.reverse();
+    if (!mounted) return;
     widget.onClose();
   }
 
@@ -114,39 +108,36 @@ class _SidebarExtensionOverlayState
       builder: (context, _) {
         return Stack(
           children: [
-            // ── Blurred backdrop (covers everything to the right of sidebar) ──
+            // ── Blurred backdrop ───────────────────────────────────────
             Positioned(
               left: LeftSidebarExtension.sidebarWidth,
-              top:  0,
+              top: 0,
               right: 0,
               bottom: 0,
               child: GestureDetector(
                 onTap: _close,
-                child: AnimatedOpacity(
+                behavior: HitTestBehavior.opaque,
+                child: Opacity(
                   opacity: _backdropOpacity.value,
-                  duration: Duration.zero,
                   child: ClipRect(
                     child: BackdropFilter(
                       filter: ImageFilter.blur(
                         sigmaX: _blurAmount.value,
                         sigmaY: _blurAmount.value,
                       ),
-                      child: Container(
-                        color: Colors.black
-                            .withOpacity(0.38 * _backdropOpacity.value),
-                      ),
+                      child: Container(color: Colors.black.withOpacity(0.42)),
                     ),
                   ),
                 ),
               ),
             ),
 
-            // ── Slide-in panel ─────────────────────────────────────────────
+            // ── Slide-in panel ─────────────────────────────────────────
             Positioned(
-              left:   LeftSidebarExtension.sidebarWidth,
-              top:    0,
+              left: LeftSidebarExtension.sidebarWidth,
+              top: 0,
               bottom: 0,
-              width:  LeftSidebarExtension.panelWidth,
+              width: LeftSidebarExtension.panelWidth,
               child: SlideTransition(
                 position: _slide,
                 child: _ExtensionPanel(onClose: _close),
@@ -156,24 +147,6 @@ class _SidebarExtensionOverlayState
         );
       },
     );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Spring easing curve — feels physical, like iOS springboard
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _SpringCurve extends Curve {
-  const _SpringCurve();
-
-  @override
-  double transformInternal(double t) {
-    // Damped spring approximation
-    const double c = 0.3; // damping
-    return 1.0 -
-        (1.0 - t) *
-            (1.0 + c * t) *
-            (1.0 - t * t * 0.1);
   }
 }
 
@@ -190,7 +163,7 @@ class _ExtensionPanel extends StatefulWidget {
 }
 
 class _ExtensionPanelState extends State<_ExtensionPanel> {
-  // Staggered fade-in for list items
+  // Recent chats data
   final List<_RecentChat> _recents = [
     _RecentChat('Integrating quantmessage_butt...', isActive: true),
     _RecentChat('Starting from scratch'),
@@ -209,11 +182,9 @@ class _ExtensionPanelState extends State<_ExtensionPanel> {
   Widget build(BuildContext context) {
     return ClipRect(
       child: BackdropFilter(
-        // Glass blur on the panel itself
         filter: ImageFilter.blur(sigmaX: 28, sigmaY: 28),
         child: Container(
           decoration: BoxDecoration(
-            // Deep near-black with slight transparency for glass effect
             color: const Color(0xFF0F0F0F).withOpacity(0.92),
             border: Border(
               right: BorderSide(
@@ -222,32 +193,40 @@ class _ExtensionPanelState extends State<_ExtensionPanel> {
               ),
             ),
           ),
-          child: Column(
-            children: [
-              _buildHeader(),
-              _buildNavItems(),
-              _buildDivider(),
-              _buildRecentsHeader(),
-              Expanded(child: _buildRecentsList()),
-              _buildFooter(),
-            ],
+          // ← FIX: wrap in DefaultTextStyle with decoration: none
+          child: DefaultTextStyle.merge(
+            style: const TextStyle(
+              decoration: TextDecoration.none, // ← kills inherited underlines
+              color: Colors.white,
+            ),
+            child: Column(
+              children: [
+                _buildHeader(),
+                _buildNavItems(),
+                _buildDivider(),
+                _buildRecentsHeader(),
+                Expanded(child: _buildRecentsList()),
+                _buildFooter(),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  // ── Header: "QuantMessage" wordmark + search + layout icons ────────────────
+  // ── Header ────────────────────────────────────────────────────────────────
   Widget _buildHeader() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 12, 10),
       child: Row(
         children: [
-          // Wordmark
+          // ← FIX: explicitly set decoration: TextDecoration.none
           const Expanded(
             child: Text(
               'QuantMessage',
               style: TextStyle(
+                decoration: TextDecoration.none, // ← prevents double underline
                 color: Colors.white,
                 fontSize: 17,
                 fontWeight: FontWeight.w700,
@@ -255,59 +234,29 @@ class _ExtensionPanelState extends State<_ExtensionPanel> {
               ),
             ),
           ),
-
-          // Search icon
-          _HeaderIconBtn(
-            icon: Icons.search,
-            onTap: () {},
-          ),
+          _HeaderIconBtn(icon: Icons.search, onTap: () {}),
           const SizedBox(width: 2),
-
-          // Layout/sidebar icon
-          _HeaderIconBtn(
-            icon: Icons.space_dashboard_outlined,
-            onTap: () {},
-          ),
+          _HeaderIconBtn(icon: Icons.space_dashboard_outlined, onTap: () {}),
         ],
       ),
     );
   }
 
-  // ── Primary nav items ──────────────────────────────────────────────────────
+  // ── Primary nav items ─────────────────────────────────────────────────────
   Widget _buildNavItems() {
     return Column(
       children: [
+        _NavItem(icon: Icons.add, label: 'New chat', onTap: () {}),
+        _NavItem(icon: Icons.chat_bubble_outline, label: 'Chats', onTap: () {}),
+        _NavItem(icon: Icons.layers_outlined, label: 'Projects', onTap: () {}),
+        _NavItem(icon: Icons.category_outlined, label: 'Artifacts', onTap: () {}),
         _NavItem(
-          icon:  Icons.add,
-          label: 'New chat',
-          onTap: () {},
-        ),
-        _NavItem(
-          icon:  Icons.chat_bubble_outline,
-          label: 'Chats',
-          onTap: () {},
-        ),
-        _NavItem(
-          icon:  Icons.layers_outlined,
-          label: 'Projects',
-          onTap: () {},
-        ),
-        _NavItem(
-          icon:  Icons.category_outlined,
-          label: 'Artifacts',
-          onTap: () {},
-        ),
-        _NavItem(
-          icon:     Icons.code,
-          label:    'Code',
+          icon: Icons.code,
+          label: 'Code',
           trailing: _UpgradeBadge(),
           onTap: () {},
         ),
-        _NavItem(
-          icon:  Icons.work_outline,
-          label: 'Customise',
-          onTap: () {},
-        ),
+        _NavItem(icon: Icons.work_outline, label: 'Customise', onTap: () {}),
       ],
     );
   }
@@ -323,15 +272,17 @@ class _ExtensionPanelState extends State<_ExtensionPanel> {
     ),
   );
 
-  // ── Recents header with filter icon ───────────────────────────────────────
+  // ── Recents header ────────────────────────────────────────────────────────
   Widget _buildRecentsHeader() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 12, 4),
       child: Row(
         children: [
+          // ← FIX: explicitly set decoration: TextDecoration.none
           Text(
             'Recents',
             style: TextStyle(
+              decoration: TextDecoration.none, // ← prevents double underline
               color: Colors.white.withOpacity(0.40),
               fontSize: 11.5,
               fontWeight: FontWeight.w500,
@@ -339,24 +290,19 @@ class _ExtensionPanelState extends State<_ExtensionPanel> {
             ),
           ),
           const Spacer(),
-          _HeaderIconBtn(
-            icon: Icons.tune,
-            size: 16,
-            onTap: () {},
-          ),
+          _HeaderIconBtn(icon: Icons.tune, size: 16, onTap: () {}),
         ],
       ),
     );
   }
 
-  // ── Scrollable recent chats list ───────────────────────────────────────────
+  // ── Scrollable recent chats ───────────────────────────────────────────────
   Widget _buildRecentsList() {
     return ListView.builder(
       physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.only(bottom: 8),
       itemCount: _recents.length,
       itemBuilder: (context, index) {
-        // Staggered entry: each item fades in slightly later
         return _StaggeredFadeItem(
           delay: Duration(milliseconds: 60 + index * 28),
           child: _RecentChatItem(chat: _recents[index]),
@@ -365,7 +311,7 @@ class _ExtensionPanelState extends State<_ExtensionPanel> {
     );
   }
 
-  // ── Footer: avatar + name + upgrade button ─────────────────────────────────
+  // ── Footer ────────────────────────────────────────────────────────────────
   Widget _buildFooter() {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 16),
@@ -379,9 +325,8 @@ class _ExtensionPanelState extends State<_ExtensionPanel> {
       ),
       child: Row(
         children: [
-          // Avatar
           Container(
-            width:  32,
+            width: 32,
             height: 32,
             decoration: const BoxDecoration(
               color: Color(0xFFD3D3D3),
@@ -391,6 +336,7 @@ class _ExtensionPanelState extends State<_ExtensionPanel> {
               child: Text(
                 'AS',
                 style: TextStyle(
+                  decoration: TextDecoration.none, // ← FIX
                   color: Colors.black87,
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
@@ -400,7 +346,7 @@ class _ExtensionPanelState extends State<_ExtensionPanel> {
           ),
           const SizedBox(width: 10),
 
-          // Name + plan
+          // ← FIX: explicitly set decoration: TextDecoration.none on both texts
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -409,6 +355,7 @@ class _ExtensionPanelState extends State<_ExtensionPanel> {
                 const Text(
                   'Anubhav Singh Rajput',
                   style: TextStyle(
+                    decoration: TextDecoration.none, // ← FIX
                     color: Colors.white,
                     fontSize: 12.5,
                     fontWeight: FontWeight.w500,
@@ -418,6 +365,7 @@ class _ExtensionPanelState extends State<_ExtensionPanel> {
                 Text(
                   'Free plan',
                   style: TextStyle(
+                    decoration: TextDecoration.none, // ← FIX
                     color: Colors.white.withOpacity(0.38),
                     fontSize: 11,
                   ),
@@ -426,26 +374,22 @@ class _ExtensionPanelState extends State<_ExtensionPanel> {
             ),
           ),
 
-          // Download icon with notification dot
           _FooterIconBtn(
             icon: Icons.file_download_outlined,
             showDot: true,
             onTap: () {},
           ),
           const SizedBox(width: 2),
-          _FooterIconBtn(
-            icon: Icons.keyboard_arrow_up,
-            onTap: () {},
-          ),
+          _FooterIconBtn(icon: Icons.keyboard_arrow_up, onTap: () {}),
         ],
       ),
     );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Small reusable components
-// ─────────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+//  Reusable components — ALL text widgets include decoration: TextDecoration.none
+// ═══════════════════════════════════════════════════════════════════════════
 
 class _HeaderIconBtn extends StatefulWidget {
   final IconData icon;
@@ -469,7 +413,7 @@ class _HeaderIconBtnState extends State<_HeaderIconBtn> {
   Widget build(BuildContext context) {
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
-      onExit:  (_) => setState(() => _hovered = false),
+      onExit: (_) => setState(() => _hovered = false),
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
         onTap: widget.onTap,
@@ -484,7 +428,7 @@ class _HeaderIconBtnState extends State<_HeaderIconBtn> {
           ),
           child: Icon(
             widget.icon,
-            size:  widget.size,
+            size: widget.size,
             color: Colors.white.withOpacity(_hovered ? 0.90 : 0.50),
           ),
         ),
@@ -493,12 +437,10 @@ class _HeaderIconBtnState extends State<_HeaderIconBtn> {
   }
 }
 
-// ── Primary navigation item ────────────────────────────────────────────────
-
 class _NavItem extends StatefulWidget {
-  final IconData  icon;
-  final String    label;
-  final Widget?   trailing;
+  final IconData icon;
+  final String label;
+  final Widget? trailing;
   final VoidCallback onTap;
 
   const _NavItem({
@@ -519,7 +461,7 @@ class _NavItemState extends State<_NavItem> {
   Widget build(BuildContext context) {
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
-      onExit:  (_) => setState(() => _hovered = false),
+      onExit: (_) => setState(() => _hovered = false),
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
         onTap: widget.onTap,
@@ -537,14 +479,16 @@ class _NavItemState extends State<_NavItem> {
             children: [
               Icon(
                 widget.icon,
-                size:  18,
+                size: 18,
                 color: Colors.white.withOpacity(_hovered ? 0.95 : 0.75),
               ),
               const SizedBox(width: 11),
+              // ← FIX: explicitly set decoration: TextDecoration.none
               Expanded(
                 child: Text(
                   widget.label,
                   style: TextStyle(
+                    decoration: TextDecoration.none, // ← FIX
                     color: Colors.white.withOpacity(_hovered ? 0.95 : 0.80),
                     fontSize: 14.5,
                     fontWeight: FontWeight.w500,
@@ -560,8 +504,6 @@ class _NavItemState extends State<_NavItem> {
   }
 }
 
-// ── "Upgrade" badge (used on Code row) ────────────────────────────────────
-
 class _UpgradeBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -575,9 +517,11 @@ class _UpgradeBadge extends StatelessWidget {
           width: 0.5,
         ),
       ),
+      // ← FIX: explicitly set decoration: TextDecoration.none
       child: Text(
         'Upgrade',
         style: TextStyle(
+          decoration: TextDecoration.none, // ← FIX
           color: Colors.white.withOpacity(0.70),
           fontSize: 11,
           fontWeight: FontWeight.w500,
@@ -587,15 +531,11 @@ class _UpgradeBadge extends StatelessWidget {
   }
 }
 
-// ── Recent chat data model ─────────────────────────────────────────────────
-
 class _RecentChat {
   final String title;
-  final bool   isActive;
+  final bool isActive;
   _RecentChat(this.title, {this.isActive = false});
 }
-
-// ── Recent chat list row ───────────────────────────────────────────────────
 
 class _RecentChatItem extends StatefulWidget {
   final _RecentChat chat;
@@ -614,7 +554,7 @@ class _RecentChatItemState extends State<_RecentChatItem> {
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
-      onExit:  (_) => setState(() => _hovered = false),
+      onExit: (_) => setState(() => _hovered = false),
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
         onTap: () {},
@@ -632,14 +572,17 @@ class _RecentChatItemState extends State<_RecentChatItem> {
           ),
           child: Row(
             children: [
+              // ← FIX: explicitly set decoration: TextDecoration.none
               Expanded(
                 child: Text(
                   widget.chat.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
+                    decoration: TextDecoration.none, // ← FIX
                     color: Colors.white.withOpacity(
-                        active ? 0.95 : (_hovered ? 0.85 : 0.60)),
+                      active ? 0.95 : (_hovered ? 0.85 : 0.60),
+                    ),
                     fontSize: 13.5,
                     fontWeight:
                     active ? FontWeight.w600 : FontWeight.w400,
@@ -649,7 +592,7 @@ class _RecentChatItemState extends State<_RecentChatItem> {
               if (_hovered)
                 Icon(
                   Icons.more_horiz,
-                  size:  16,
+                  size: 16,
                   color: Colors.white.withOpacity(0.45),
                 ),
             ],
@@ -659,8 +602,6 @@ class _RecentChatItemState extends State<_RecentChatItem> {
     );
   }
 }
-
-// ── Footer icon button ─────────────────────────────────────────────────────
 
 class _FooterIconBtn extends StatefulWidget {
   final IconData icon;
@@ -684,7 +625,7 @@ class _FooterIconBtnState extends State<_FooterIconBtn> {
   Widget build(BuildContext context) {
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
-      onExit:  (_) => setState(() => _hovered = false),
+      onExit: (_) => setState(() => _hovered = false),
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
         onTap: widget.onTap,
@@ -702,9 +643,8 @@ class _FooterIconBtnState extends State<_FooterIconBtn> {
               ),
               child: Icon(
                 widget.icon,
-                size:  18,
-                color: Colors.white.withOpacity(
-                    _hovered ? 0.90 : 0.50),
+                size: 18,
+                color: Colors.white.withOpacity(_hovered ? 0.90 : 0.50),
               ),
             ),
             if (widget.showDot)
@@ -712,7 +652,7 @@ class _FooterIconBtnState extends State<_FooterIconBtn> {
                 right: 4,
                 top: 4,
                 child: Container(
-                  width:  6,
+                  width: 6,
                   height: 6,
                   decoration: const BoxDecoration(
                     color: Colors.blueAccent,
@@ -730,7 +670,7 @@ class _FooterIconBtnState extends State<_FooterIconBtn> {
 // ── Staggered fade-in for list items ─────────────────────────────────────
 
 class _StaggeredFadeItem extends StatefulWidget {
-  final Widget   child;
+  final Widget child;
   final Duration delay;
 
   const _StaggeredFadeItem({
@@ -745,21 +685,21 @@ class _StaggeredFadeItem extends StatefulWidget {
 class _StaggeredFadeItemState extends State<_StaggeredFadeItem>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
-  late final Animation<double>   _opacity;
-  late final Animation<Offset>   _slide;
+  late final Animation<double> _opacity;
+  late final Animation<Offset> _slide;
 
   @override
   void initState() {
     super.initState();
     _ctrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 320),
+      duration: const Duration(milliseconds: 280),
     );
     _opacity = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
     _slide = Tween<Offset>(
       begin: const Offset(-0.06, 0),
-      end:   Offset.zero,
-    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
 
     Future.delayed(widget.delay, () {
       if (mounted) _ctrl.forward();
