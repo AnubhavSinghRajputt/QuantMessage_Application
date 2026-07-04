@@ -1,9 +1,6 @@
 // lib/screens/chat_screen.dart
-//
 // QuantMessage Chat Screen
-// • Supabase auth‑aware (sign‑out, personalized greeting)
-// • Cross‑platform attachments (web + mobile) via Uint8List
-//
+// Integrated with Flowise AI and Supabase Auth/Storage
 
 import 'dart:async';
 import 'dart:io' show File;
@@ -15,7 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:path/path.dart' as p; // ← path helper
+import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -23,37 +20,13 @@ import '../core/app_theme.dart';
 import '../core/chat_message.dart';
 import '../core/attachment_model.dart';
 import '../services/quant_space_api.dart';
-import '../services/upload_service.dart';
 import 'animations/animation_effects/infinity_animation.dart';
 import 'sidebar_panel/left_sidebar.dart';
 import 'widgets/attachment_preview.dart';
 import 'widgets/attachment_thumbnail.dart';
 import 'widgets/attachment_picker_sheet.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Supabase – initialise on first use (reads .env)
-// ─────────────────────────────────────────────────────────────────────────────
-
-// A tiny flag that survives across widget rebuilds – we only initialise once.
-bool _supabaseInitialized = false;
-
-/// Calls `Supabase.initialize` the first time it is needed.
-/// Subsequent calls become a no‑op, avoiding the removed `initialized` getter.
-Future<void> _ensureSupabaseInitialized() async {
-  if (_supabaseInitialized) return;
-  await Supabase.initialize(
-    url: dotenv.env['SUPABASE_URL'] ?? '',
-    anonKey: dotenv.env['SUPABASE_ANON_KEY'] ?? '',
-    // Optional: you can also pass the service role key if you ever need it —
-    // but it must NOT be shipped to client builds.
-    // serviceRoleKey: dotenv.env['SUPABASE_SERVICE_ROLE_KEY'],
-  );
-  _supabaseInitialized = true;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-//  Fade‑in animation
-// ═══════════════════════════════════════════════════════════════════════════
+// Fade-in animation widget
 class FadeInAnimation extends StatefulWidget {
   final Widget child;
   final Duration duration;
@@ -79,8 +52,7 @@ class _FadeInAnimationState extends State<FadeInAnimation>
   @override
   void initState() {
     super.initState();
-    _controller =
-        AnimationController(vsync: this, duration: widget.duration);
+    _controller = AnimationController(vsync: this, duration: widget.duration);
     final curve = CurvedAnimation(parent: _controller, curve: widget.curve);
     _opacityAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(curve);
     if (widget.delay != null) {
@@ -103,9 +75,7 @@ class _FadeInAnimationState extends State<FadeInAnimation>
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Typing‑text animation
-// ═══════════════════════════════════════════════════════════════════════════
+// Typing-text animation widget
 class TypingText extends StatefulWidget {
   final String text;
   final TextStyle? style;
@@ -200,9 +170,7 @@ class _TypingTextState extends State<TypingText> {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Chat screen
-// ═══════════════════════════════════════════════════════════════════════════
+// Main Chat Screen
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
   @override
@@ -210,31 +178,28 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
-  // ── Supabase user ────────────────────────────────────────────────────────
+  // Supabase user data
   User? get _currentUser => Supabase.instance.client.auth.currentUser;
   String? get _userEmail => _currentUser?.email;
   String? get _userName =>
       _currentUser?.userMetadata?['full_name'] as String? ??
           _currentUser?.email?.split('@').first;
 
-  // ── Controllers & services ───────────────────────────────────────────────
+  // Controllers and API services
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final QuantSpaceApi _api = QuantSpaceApi();
-  final UploadService _uploader = UploadService();
   final FocusNode _inputFocus = FocusNode();
 
-  // ── State ────────────────────────────────────────────────────────────────
+  // State management
   final List<ChatMessage> _messages = [];
   bool _isTyping = false;
-
-  String? _activeConversationId;
   final List<Attachment> _pendingAttachments = [];
 
-  String _selectedModelName = 'Gemini 1.5 Flash';
-  String _selectedModelId = 'gemini/gemini-1.5-flash';
+  String _selectedModelName = 'QuantCore 1.0';
+  String _selectedModelId = 'groq/llama-3.1-70b-versatile';
 
-  // ── Animations ───────────────────────────────────────────────────────────
+  // UI Animations
   late final AnimationController _inputFocusCtrl;
   late final Animation<double> _inputGlow;
   late final AnimationController _sendBtnCtrl;
@@ -244,28 +209,15 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   late final Animation<double> _emptyScale;
 
   final List<Map<String, String>> _aiModels = [
-    {'name': 'Gemini 1.5 Flash', 'id': 'gemini/gemini-1.5-flash', 'icon': '✨'},
+    {'name': 'QuantCore 1.0', 'id': 'groq/llama-3.1-70b-versatile', 'icon': '⚡'},
     {'name': 'GPT-4o', 'id': 'openai/gpt-4o', 'icon': '🧠'},
-    {
-      'name': 'Claude 3.5 Sonnet',
-      'id': 'openrouter/anthropic/claude-3.5-sonnet',
-      'icon': '🎭'
-    },
-    {'name': 'QuantSync v1.0', 'id': 'groq/llama-3.1-70b-versatile', 'icon': '⚡'},
-    {'name': 'Llama 3.1 8B', 'id': 'groq/llama-3.1-8b-instant', 'icon': '🚀'},
-    {'name': 'Mixtral 8x7B', 'id': 'groq/mixtral-8x7b-32768', 'icon': '🔥'},
-    {'name': 'DeepSeek Chat', 'id': 'openrouter/deepseek/deepseek-chat', 'icon': '🤖'},
+    {'name': 'Claude 3.5 Sonnet', 'id': 'anthropic/claude-3.5', 'icon': '🎭'},
   ];
 
-  // ── Initialise ───────────────────────────────────────────────────────────
   @override
   void initState() {
     super.initState();
 
-    // Initialise Supabase (reads .env). Runs only once per app launch.
-    _ensureSupabaseInitialized();
-
-    // Input‑focus animation
     _inputFocusCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 260));
     _inputGlow = CurvedAnimation(parent: _inputFocusCtrl, curve: Curves.easeOut);
@@ -275,7 +227,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
           : _inputFocusCtrl.reverse();
     });
 
-    // Send‑button press animation
     _sendBtnCtrl = AnimationController(
         vsync: this,
         duration: const Duration(milliseconds: 110),
@@ -284,7 +235,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     _sendBtnScale = Tween<double>(begin: 1.0, end: 0.86).animate(
         CurvedAnimation(parent: _sendBtnCtrl, curve: Curves.easeInOut));
 
-    // Empty‑state intro animation
     _emptyCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 650));
     _emptyOpacity = CurvedAnimation(parent: _emptyCtrl, curve: Curves.easeOut);
     _emptyScale = Tween<double>(begin: 0.96, end: 1.0).animate(
@@ -303,7 +253,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  // ── Sign‑out handler ──────────────────────────────────────────────────────
+  // Sign-out handler
   Future<void> _handleSignOut() async {
     try {
       await Supabase.instance.client.auth.signOut();
@@ -320,10 +270,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     }
   }
 
-  // ── Attachment handlers (cross‑platform) ──────────────────────────────────
-
-  /// Called by [AttachmentPickerSheet]. Receives raw bytes — works on both
-  /// web (no `File`) and mobile (we save to a temp file for the upload service).
+  // Attachment handlers
   void _addAttachment(Uint8List bytes, String filename, String mimeType) {
     final attachment = Attachment(
       filename: filename,
@@ -335,13 +282,10 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
     setState(() => _pendingAttachments.add(attachment));
 
-    // Mobile: write the bytes to a temporary file so `UploadService`
-    // can stream it. Web: `getTemporaryDirectory` throws – we simply ignore.
     _writeTempFile(bytes, filename).then((file) {
       if (!mounted || file == null) return;
       setState(() {
-        final idx = _pendingAttachments.indexWhere((a) =>
-        a.filename == filename && a.sizeBytes == bytes.length);
+        final idx = _pendingAttachments.indexWhere((a) => a.filename == filename);
         if (idx != -1) {
           _pendingAttachments[idx] = _pendingAttachments[idx].copyWith(localFile: file);
         }
@@ -356,7 +300,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     return AttachmentType.unknown;
   }
 
-  /// Writes bytes to a temporary file. Returns `null` on web (no filesystem).
   Future<File?> _writeTempFile(Uint8List bytes, String filename) async {
     try {
       final dir = await getTemporaryDirectory();
@@ -364,7 +307,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       await tempFile.writeAsBytes(bytes, flush: true);
       return tempFile;
     } catch (_) {
-      // On web `getTemporaryDirectory` throws – that's fine.
       return null;
     }
   }
@@ -377,87 +319,15 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     setState(() => _pendingAttachments.removeAt(index));
   }
 
-  Future<Attachment> _uploadPendingAttachment(Attachment att) async {
-    _ensureConversationId();
-
-    // Mark as uploading
-    setState(() {
-      final idx = _pendingAttachments.indexOf(att);
-      if (idx != -1) {
-        _pendingAttachments[idx] =
-            att.copyWith(status: UploadStatus.uploading, progress: 0.1);
-      }
-    });
-
-    // Mobile: wait a moment for the temp file to be written, if needed.
-    if (att.localFile == null) {
-      for (int i = 0; i < 20; i++) {
-        await Future.delayed(const Duration(milliseconds: 100));
-        final refreshed = _pendingAttachments.firstWhere(
-              (a) => a.filename == att.filename && a.sizeBytes == att.sizeBytes,
-          orElse: () => att,
-        );
-        if (refreshed.localFile != null) break;
-      }
-    }
-
-    try {
-      final ready = _pendingAttachments.firstWhere(
-            (a) => a.filename == att.filename && a.sizeBytes == att.sizeBytes,
-        orElse: () => att,
-      );
-
-      if (ready.localFile == null) {
-        throw Exception(
-            'File not ready. Web uploads need backend support — see docs.');
-      }
-
-      final uploaded = await _uploader.uploadFile(
-        file: ready.localFile!,
-        conversationId: _activeConversationId!,
-        onProgress: (p) {
-          if (!mounted) return;
-          setState(() {
-            final i = _pendingAttachments.indexWhere(
-                    (a) => a.filename == att.filename && a.sizeBytes == att.sizeBytes);
-            if (i != -1) {
-              _pendingAttachments[i] =
-                  _pendingAttachments[i].copyWith(progress: p);
-            }
-          });
-        },
-      );
-
-      if (!mounted) return uploaded;
-      setState(() {
-        final i = _pendingAttachments.indexWhere(
-                (a) => a.filename == att.filename && a.sizeBytes == att.sizeBytes);
-        if (i != -1) _pendingAttachments[i] = uploaded;
-      });
-      return uploaded;
-    } catch (e) {
-      if (!mounted) return att;
-      setState(() {
-        final i = _pendingAttachments.indexWhere(
-                (a) => a.filename == att.filename && a.sizeBytes == att.sizeBytes);
-        if (i != -1) {
-          _pendingAttachments[i] = att.copyWith(status: UploadStatus.failed);
-        }
-      });
-      rethrow;
-    }
-  }
-
-  void _ensureConversationId() {
-    _activeConversationId ??=
-        DateTime.now().millisecondsSinceEpoch.toString();
-  }
-
-  // ── Send handler ─────────────────────────────────────────────────────────
+  // Main Send Logic integrated with Flowise and Supabase Storage
   Future<void> _handleSend() async {
     final text = _controller.text.trim();
     final hasAttachments = _pendingAttachments.isNotEmpty;
     if ((text.isEmpty && !hasAttachments) || _isTyping) return;
+
+    // Use Supabase User ID as session ID for AI memory
+    final userId = Supabase.instance.client.auth.currentUser?.id ?? "guest_user";
+    final conversationId = DateTime.now().millisecondsSinceEpoch.toString();
 
     _emptyCtrl.reset();
 
@@ -475,33 +345,26 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     _scrollToBottom();
 
     try {
-      _ensureConversationId();
+      String finalPrompt = text;
 
-      // Upload any pending attachments
-      final uploaded = <Attachment>[];
+      // Upload pending files to Supabase Storage first and append URLs to prompt
       for (final att in pendingSnapshot) {
-        if (att.isReady) {
-          uploaded.add(att);
-        } else if (att.localFile != null) {
-          uploaded.add(await _uploadPendingAttachment(att));
+        if (att.localFile != null) {
+          final uploadRes = await _api.uploadFile(att.localFile!.path, conversationId: conversationId);
+          if (uploadRes['status'] == 'success') {
+            final url = uploadRes['url'];
+            finalPrompt += "\n[Attachment: $url]";
+          }
         }
       }
 
-      // Send the message (includes attachments if any)
-      final response = await _uploader.sendMessageWithAttachments(
-        message: text.isEmpty
-            ? 'Please analyze the attached file(s).'
-            : text,
-        attachments: uploaded,
-        conversationId: _activeConversationId!,
-      );
+      // Call the Flowise Multi-Agent API
+      final response = await _api.getAIResponse(finalPrompt, userId);
 
       if (!mounted) return;
       setState(() {
-        _activeConversationId =
-            response['conversation_id'] as String? ?? _activeConversationId;
         _messages.add(ChatMessage(
-          text: response['content'] as String? ?? '',
+          text: response,
           isUser: false,
           modelName: _selectedModelName,
         ));
@@ -530,27 +393,21 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     });
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  //  Build
-  // ═══════════════════════════════════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.backgroundBlack,
       body: Row(
         children: [
-          // Left sidebar (new chat, etc.)
           LeftSidebar(
             onNewChat: () {
               setState(() {
                 _messages.clear();
-                _activeConversationId = null;
                 _pendingAttachments.clear();
                 _emptyCtrl.forward(from: 0.0);
               });
             },
           ),
-          // Main chat area
           Expanded(
             child: Stack(
               children: [
@@ -559,8 +416,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                   Center(
                     child: SingleChildScrollView(
                       physics: const BouncingScrollPhysics(),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 40),
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
                       child: FadeTransition(
                         opacity: _emptyOpacity,
                         child: ScaleTransition(
@@ -585,8 +441,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                     children: [
                       Expanded(child: _buildChatThread()),
                       Padding(
-                        padding: const EdgeInsets.only(
-                            bottom: 20, left: 20, right: 20),
+                        padding: const EdgeInsets.only(bottom: 20, left: 20, right: 20),
                         child: Align(
                           alignment: Alignment.bottomCenter,
                           child: _buildInputBox(),
@@ -602,7 +457,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     );
   }
 
-  // ── Greeting header (shows user name & sign‑in info) ───────────────────────
   Widget _buildGreeting() {
     final userName = _userName ?? 'there';
     return Column(
@@ -659,7 +513,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     );
   }
 
-  // ── Chat thread list ───────────────────────────────────────────────────────
   Widget _buildChatThread() {
     return ListView.builder(
       controller: _scrollController,
@@ -673,7 +526,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     );
   }
 
-  // ── Typing indicator (AI “thinking”) ─────────────────────────────────────
   Widget _buildTypingIndicator() {
     return Padding(
       padding: const EdgeInsets.all(20),
@@ -700,7 +552,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     );
   }
 
-  // ── Input box (text field + attachment UI) ────────────────────────────────
   Widget _buildInputBox() {
     return AnimatedBuilder(
       animation: _inputGlow,
@@ -728,13 +579,11 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Show pending attachment thumbnails
             if (_pendingAttachments.isNotEmpty)
               AttachmentPreviewStrip(
                 attachments: _pendingAttachments,
                 onRemove: _removePendingAttachment,
               ),
-            // Text field
             TextField(
               controller: _controller,
               focusNode: _inputFocus,
@@ -754,7 +603,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               onSubmitted: (_) => _handleSend(),
             ),
             const SizedBox(height: 8),
-            // Action icons (attachment, model selector, send, etc.)
             Align(
               alignment: Alignment.centerRight,
               child: SingleChildScrollView(
@@ -774,8 +622,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                       items: _aiModels.map((model) {
                         return DropdownMenuItemData(
                           title: model['name']!,
-                          subtitle:
-                          "Powered by ${model['id']!.split('/').last}",
+                          subtitle: "Powered by ${model['id']!.split('/').last}",
                           trailing: Text(model['icon']!,
                               style: const TextStyle(fontSize: 16)),
                           onTap: () => setState(() {
@@ -792,7 +639,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                     const SizedBox(width: 8),
                     _AnimatedHoverIcon(icon: Icons.graphic_eq, onTap: () {}),
                     const SizedBox(width: 12),
-                    // Send button (press‑down animation)
                     GestureDetector(
                       onTapDown: (_) => _sendBtnCtrl.forward(),
                       onTapUp: (_) async {
@@ -802,7 +648,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                       onTapCancel: () => _sendBtnCtrl.reverse(),
                       child: ScaleTransition(
                         scale: _sendBtnScale,
-                        child: _AnimatedHoverSendButton(),
+                        child: _AnimatedHoverSendButton(onTap: () {  },),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -820,7 +666,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     );
   }
 
-  // ── Suggestion pills shown on the empty state ───────────────────────────────
   Widget _buildSuggestionPills() {
     return Wrap(
       spacing: 8,
@@ -837,9 +682,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Animated Message Row (renders attachments)
-// ═══════════════════════════════════════════════════════════════════════════
+// Animated Message Row
 class _AnimatedMessageRow extends StatefulWidget {
   final ChatMessage message;
   const _AnimatedMessageRow({required this.message});
@@ -873,12 +716,8 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow> {
           children: [
             CircleAvatar(
               radius: 16,
-              backgroundColor:
-              msg.isUser ? Colors.white10 : Colors.blueAccent,
-              child: Text(
-                msg.isUser ? "👤" : "🤖",
-                style: const TextStyle(fontSize: 12),
-              ),
+              backgroundColor: msg.isUser ? Colors.white10 : Colors.blueAccent,
+              child: Text(msg.isUser ? "👤" : "🤖", style: const TextStyle(fontSize: 12)),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -887,8 +726,7 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow> {
                 children: [
                   Text(
                     msg.isUser ? "USER" : msg.modelName.toUpperCase(),
-                    style: GoogleFonts.jetBrainsMono(
-                        fontSize: 10, color: Colors.white38),
+                    style: GoogleFonts.jetBrainsMono(fontSize: 10, color: Colors.white38),
                   ),
                   const SizedBox(height: 5),
                   if (hasAttachments)
@@ -896,14 +734,12 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow> {
                   if (hasText)
                     ConstrainedBox(
                       constraints: BoxConstraints(
-                          maxWidth:
-                          MediaQuery.of(context).size.width * 0.8),
+                          maxWidth: MediaQuery.of(context).size.width * 0.8),
                       child: msg.isUser
                           ? MarkdownBody(
                         data: msg.text,
                         styleSheet: MarkdownStyleSheet(
-                            p: GoogleFonts.outfit(
-                                color: Colors.white, fontSize: 15)),
+                            p: GoogleFonts.outfit(color: Colors.white, fontSize: 15)),
                       )
                           : _buildAIContent(),
                     ),
@@ -933,9 +769,7 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow> {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Other UI components
-// ═════════════════════════════════════════════════════════════════════════==
+// Helper UI components
 class _SuggestionPill extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -1048,6 +882,8 @@ class _AnimatedHoverDropdownButtonState
 }
 
 class _AnimatedHoverSendButton extends StatefulWidget {
+  final VoidCallback onTap;
+  const _AnimatedHoverSendButton({required this.onTap});
   @override
   State<_AnimatedHoverSendButton> createState() =>
       _AnimatedHoverSendButtonState();
@@ -1060,16 +896,19 @@ class _AnimatedHoverSendButtonState extends State<_AnimatedHoverSendButton> {
     cursor: SystemMouseCursors.click,
     onEnter: (_) => setState(() => _isHovered = true),
     onExit: (_) => setState(() => _isHovered = false),
-    child: AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: _isHovered ? Colors.white : Colors.white24,
-        shape: BoxShape.circle,
+    child: GestureDetector(
+      onTap: widget.onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: _isHovered ? Colors.white : Colors.white24,
+          shape: BoxShape.circle,
+        ),
+        child: Icon(Icons.arrow_upward_rounded,
+            color: _isHovered ? Colors.black : Colors.white,
+            size: 20),
       ),
-      child: Icon(Icons.arrow_upward_rounded,
-          color: _isHovered ? Colors.black : Colors.white,
-          size: 20),
     ),
   );
 }
@@ -1117,7 +956,6 @@ class _ChatParticlePainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-// ── Animated dropdown (model selector) ───────────────────────────────────────
 class AnimatedDropdown extends StatefulWidget {
   final Widget child;
   final List<DropdownMenuItemData> items;
@@ -1171,14 +1009,12 @@ class _AnimatedDropdownState extends State<AnimatedDropdown>
     _overlayEntry = OverlayEntry(
       builder: (context) => Stack(
         children: [
-          // Dismiss area
           Positioned.fill(
             child: GestureDetector(
                 behavior: HitTestBehavior.translucent,
                 onTap: _closeDropdown,
                 child: const ColoredBox(color: Colors.transparent)),
           ),
-          // Dropdown content
           CompositedTransformFollower(
             link: _layerLink,
             offset: Offset(0, size.height + 8),
@@ -1260,7 +1096,6 @@ class _AnimatedDropdownState extends State<AnimatedDropdown>
   );
 }
 
-// ── Dropdown data model ─────────────────────────────────────────────────────
 class DropdownMenuItemData {
   final String title;
   final String? subtitle;
@@ -1286,7 +1121,6 @@ class DropdownMenuItemData {
       const DropdownMenuItemData(isDivider: true);
 }
 
-// ── Individual dropdown item widget ───────────────────────────────────────
 class _DropdownItemWidget extends StatefulWidget {
   final DropdownMenuItemData item;
   final VoidCallback onItemTapped;

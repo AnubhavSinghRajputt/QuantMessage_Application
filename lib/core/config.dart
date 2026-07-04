@@ -14,17 +14,13 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 class Config {
   Config._(); // private constructor – this class is never instantiated
 
-  // ----------------------------------------------------------------------
   //  Initialise the .env file – call this **once** in `main()` before any
   //  other code runs.
-  // ----------------------------------------------------------------------
   static Future<void> init() async {
     await dotenv.load(); // loads .env from the project root
   }
 
-  // ----------------------------------------------------------------------
   //  Supabase credentials (must exist in .env – otherwise fall‑back defaults)
-  // ----------------------------------------------------------------------
   static String get supabaseUrl =>
       dotenv.env['SUPABASE_URL'] ??
           'https://example.supabase.co'; // <-- put a sensible placeholder
@@ -32,20 +28,14 @@ class Config {
   static String get supabaseAnonKey =>
       dotenv.env['SUPABASE_ANON_KEY'] ?? '';
 
-  // ----------------------------------------------------------------------
   //  Optional service‑role / JWT secret – never shipped to the client.
-  // ----------------------------------------------------------------------
   static String? get supabaseServiceRoleKey => dotenv.env['SUPABASE_SERVICE_ROLE_KEY'];
   static String? get supabaseJwtSecret => dotenv.env['SUPABASE_JWT_SECRET'];
 
-  // ----------------------------------------------------------------------
   //  Platform helper – useful when you need to branch for web vs mobile.
-  // ----------------------------------------------------------------------
   static bool get isWeb => kIsWeb;
 
-  // ----------------------------------------------------------------------
   //  Default AI‑model list – typed for safety and easy consumption.
-  // ----------------------------------------------------------------------
   static const List<AiModel> models = [
     AiModel(
         name: 'Gemini 1.5 Flash',
@@ -85,9 +75,7 @@ class Config {
   ];
 }
 
-// --------------------------------------------------------------------------
 //  Simple value‑object that describes an AI model – makes the UI type‑safe.
-// --------------------------------------------------------------------------
 class AiModel {
   final String name;
   final String id;

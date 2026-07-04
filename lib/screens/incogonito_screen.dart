@@ -1,8 +1,6 @@
 // lib/screens/incognito_screen.dart
-//
 // QuantMessage — Ghost Mode (ephemeral, no DB persistence)
-// Cross-platform + Supabase-aware
-//
+// Integrated with Flowise AI, Supabase, and updated Attachment Models
 
 import 'dart:async';
 import 'dart:io' show File;
@@ -14,6 +12,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -21,11 +20,9 @@ import '../core/app_theme.dart';
 import '../core/chat_message.dart';
 import '../core/attachment_model.dart';
 import '../services/quant_space_api.dart';
-import '../services/upload_service.dart';
 import 'widgets/attachment_preview.dart';
 import 'widgets/attachment_thumbnail.dart';
 import 'widgets/attachment_picker_sheet.dart';
-// ─── NEW IMPORT ───
 import 'animations/animation_effects/infinity_animation_incogonito.dart';
 
 class IncognitoScreen extends StatefulWidget {
@@ -34,16 +31,14 @@ class IncognitoScreen extends StatefulWidget {
   State<IncognitoScreen> createState() => _IncognitoScreenState();
 }
 
-class _IncognitoScreenState extends State<IncognitoScreen>
-    with TickerProviderStateMixin {
-  // ── Supabase user ────────────────────────────────────────────────────────
+class _IncognitoScreenState extends State<IncognitoScreen> with TickerProviderStateMixin {
+  // Supabase user
   User? get _currentUser => Supabase.instance.client.auth.currentUser;
   String? get _userEmail => _currentUser?.email;
 
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final QuantSpaceApi _api = QuantSpaceApi();
-  final UploadService _uploader = UploadService();
   final FocusNode _inputFocus = FocusNode();
 
   final List<ChatMessage> _messages = [];
@@ -63,14 +58,10 @@ class _IncognitoScreenState extends State<IncognitoScreen>
   @override
   void initState() {
     super.initState();
-    _inputFocusCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 260));
-    _inputGlow =
-        CurvedAnimation(parent: _inputFocusCtrl, curve: Curves.easeOut);
+    _inputFocusCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 260));
+    _inputGlow = CurvedAnimation(parent: _inputFocusCtrl, curve: Curves.easeOut);
     _inputFocus.addListener(() {
-      _inputFocus.hasFocus
-          ? _inputFocusCtrl.forward()
-          : _inputFocusCtrl.reverse();
+      _inputFocus.hasFocus ? _inputFocusCtrl.forward() : _inputFocusCtrl.reverse();
     });
 
     _sendBtnCtrl = AnimationController(
@@ -81,10 +72,8 @@ class _IncognitoScreenState extends State<IncognitoScreen>
     _sendBtnScale = Tween<double>(begin: 1.0, end: 0.86).animate(
         CurvedAnimation(parent: _sendBtnCtrl, curve: Curves.easeInOut));
 
-    _emptyCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 650));
-    _emptyOpacity =
-        CurvedAnimation(parent: _emptyCtrl, curve: Curves.easeOut);
+    _emptyCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 650));
+    _emptyOpacity = CurvedAnimation(parent: _emptyCtrl, curve: Curves.easeOut);
     _emptyScale = Tween<double>(begin: 0.96, end: 1.0).animate(
         CurvedAnimation(parent: _emptyCtrl, curve: Curves.easeOutBack));
     _emptyCtrl.forward();
@@ -93,8 +82,7 @@ class _IncognitoScreenState extends State<IncognitoScreen>
   }
 
   void _generateEphemeralId() {
-    _ephemeralSessionId =
-    'ghost_${DateTime.now().millisecondsSinceEpoch}_${math.Random().nextInt(9999)}';
+    _ephemeralSessionId = 'ghost_${DateTime.now().millisecondsSinceEpoch}_${math.Random().nextInt(9999)}';
   }
 
   @override
@@ -108,13 +96,11 @@ class _IncognitoScreenState extends State<IncognitoScreen>
     super.dispose();
   }
 
-  // ── Exit incognito ───────────────────────────────────────────────────────
   void _exitIncognito() {
     Navigator.of(context).pop();
   }
 
-  // ── Attachment handlers (cross-platform) ──────────────────────────────────
-
+  // Attachment handlers
   void _addAttachment(Uint8List bytes, String filename, String mimeType) {
     final attachment = Attachment(
       filename: filename,
@@ -129,10 +115,10 @@ class _IncognitoScreenState extends State<IncognitoScreen>
     _writeTempFile(bytes, filename).then((file) {
       if (!mounted || file == null) return;
       setState(() {
-        final idx = _pendingAttachments.indexWhere((a) =>
-        a.filename == filename && a.sizeBytes == bytes.length);
+        final idx = _pendingAttachments.indexWhere((a) => a.filename == filename);
         if (idx != -1) {
-          _pendingAttachments[idx].localFile = file;
+          // FIXED: Use copyWith instead of direct setter to avoid 'final' error
+          _pendingAttachments[idx] = _pendingAttachments[idx].copyWith(localFile: file);
         }
       });
     });
@@ -148,11 +134,11 @@ class _IncognitoScreenState extends State<IncognitoScreen>
   Future<File?> _writeTempFile(Uint8List bytes, String filename) async {
     try {
       final dir = await getTemporaryDirectory();
-      final tempFile = File('${dir.path}/$filename');
+      final tempFile = File(p.join(dir.path, filename));
       await tempFile.writeAsBytes(bytes, flush: true);
       return tempFile;
     } catch (e) {
-      return null; // Web — no temp file
+      return null;
     }
   }
 
@@ -164,82 +150,50 @@ class _IncognitoScreenState extends State<IncognitoScreen>
     setState(() => _pendingAttachments.removeAt(index));
   }
 
+  // Logic to upload a file using the new QuantSpaceApi
   Future<Attachment?> _uploadPendingAttachment(Attachment att) async {
-    _generateEphemeralId();
-
     setState(() {
       final idx = _pendingAttachments.indexOf(att);
       if (idx != -1) {
-        _pendingAttachments[idx] =
-            att.copyWith(status: UploadStatus.uploading, progress: 0.1);
+        _pendingAttachments[idx] = att.copyWith(status: UploadStatus.uploading, progress: 0.1);
       }
     });
 
-    if (att.localFile == null) {
-      for (int i = 0; i < 20; i++) {
-        await Future.delayed(const Duration(milliseconds: 100));
-        final refreshed = _pendingAttachments.firstWhere(
-              (a) => a.filename == att.filename && a.sizeBytes == att.sizeBytes,
-          orElse: () => att,
-        );
-        if (refreshed.localFile != null) break;
-      }
-    }
-
     try {
-      final ready = _pendingAttachments.firstWhere(
-            (a) => a.filename == att.filename && a.sizeBytes == att.sizeBytes,
-        orElse: () => att,
-      );
+      if (att.localFile == null) return null;
 
-      if (ready.localFile == null) {
-        throw Exception('File not ready');
-      }
-
-      final result = await _uploader.uploadFile(
-        file: ready.localFile!,
+      // Use the unified API upload method
+      final result = await _api.uploadFile(
+        att.localFile!.path,
         conversationId: _ephemeralSessionId!,
-        onProgress: (p) {
-          if (!mounted) return;
-          setState(() {
-            final i = _pendingAttachments.indexWhere(
-                  (a) =>
-              a.filename == att.filename && a.sizeBytes == att.sizeBytes,
-            );
-            if (i != -1) {
-              _pendingAttachments[i] =
-                  _pendingAttachments[i].copyWith(progress: p);
-            }
-          });
-        },
       );
 
-      if (!mounted) return result;
-      setState(() {
-        final i = _pendingAttachments.indexWhere(
-              (a) =>
-          a.filename == att.filename && a.sizeBytes == att.sizeBytes,
+      if (result['status'] == 'success') {
+        final uploadedAttachment = att.copyWith(
+          status: UploadStatus.success,
+          url: result['url'],
+          progress: 1.0,
         );
-        if (i != -1) _pendingAttachments[i] = result;
-      });
-      return result;
+
+        setState(() {
+          final i = _pendingAttachments.indexWhere((a) => a.filename == att.filename);
+          if (i != -1) _pendingAttachments[i] = uploadedAttachment;
+        });
+        return uploadedAttachment;
+      }
+      return null;
     } catch (e) {
-      if (!mounted) return null;
       setState(() {
-        final i = _pendingAttachments.indexWhere(
-              (a) =>
-          a.filename == att.filename && a.sizeBytes == att.sizeBytes,
-        );
+        final i = _pendingAttachments.indexWhere((a) => a.filename == att.filename);
         if (i != -1) {
-          _pendingAttachments[i] =
-              att.copyWith(status: UploadStatus.failed);
+          _pendingAttachments[i] = att.copyWith(status: UploadStatus.failed);
         }
       });
       return null;
     }
   }
 
-  // ── Send handler ─────────────────────────────────────────────────────────
+  // Send handler integrated with Flowise logic
   Future<void> _handleSend() async {
     final text = _controller.text.trim();
     final hasAttachments = _pendingAttachments.isNotEmpty;
@@ -261,28 +215,27 @@ class _IncognitoScreenState extends State<IncognitoScreen>
     _scrollToBottom();
 
     try {
-      final uploaded = <Attachment>[];
+      String finalPrompt = text;
+
+      // Upload all pending attachments first and append their URLs to the prompt
       for (final att in pendingSnapshot) {
-        if (att.isReady) {
-          uploaded.add(att);
-        } else if (att.localFile != null) {
+        if (att.localFile != null) {
           final result = await _uploadPendingAttachment(att);
-          if (result != null) uploaded.add(result);
+          if (result != null && result.url != null) {
+            finalPrompt += "\n[File: ${result.url}]";
+          }
+        } else if (att.url != null) {
+          finalPrompt += "\n[File: ${att.url}]";
         }
       }
 
-      final response = await _uploader.sendMessageWithAttachments(
-        message:
-        text.isEmpty ? 'Please analyze the attached file(s).' : text,
-        attachments: uploaded,
-        conversationId: _ephemeralSessionId,
-        isIncognito: true,
-      );
+      // Call the Flowise Brain using the ephemeral session ID
+      final response = await _api.getAIResponse(finalPrompt, _ephemeralSessionId!);
 
       if (!mounted) return;
       setState(() {
         _messages.add(ChatMessage(
-          text: response['content'] as String? ?? '',
+          text: response,
           isUser: false,
           modelName: 'GHOST AI',
         ));
@@ -323,10 +276,6 @@ class _IncognitoScreenState extends State<IncognitoScreen>
     _emptyCtrl.forward(from: 0.0);
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  //  Build
-  // ═══════════════════════════════════════════════════════════════════════════
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -337,14 +286,13 @@ class _IncognitoScreenState extends State<IncognitoScreen>
         children: [
           const _ParticleBackground(count: 25),
           if (_messages.isEmpty)
-            _buildEmptyStateResponsive() // 👈 RESPONSIVE EMPTY STATE
+            _buildEmptyStateResponsive()
           else
             Column(
               children: [
                 Expanded(child: _buildChatThread()),
                 Padding(
-                  padding: const EdgeInsets.only(
-                      bottom: 20, left: 20, right: 20),
+                  padding: const EdgeInsets.only(bottom: 20, left: 20, right: 20),
                   child: Align(
                     alignment: Alignment.bottomCenter,
                     child: FadeInAnimation(
@@ -360,29 +308,23 @@ class _IncognitoScreenState extends State<IncognitoScreen>
     );
   }
 
-  // ─── NEW: Responsive Empty State Wrapper ───
   Widget _buildEmptyStateResponsive() {
     return LayoutBuilder(
       builder: (context, constraints) {
         return SingleChildScrollView(
           physics: const BouncingScrollPhysics(),
-          // Ensures content is centered vertically even if taller than viewport
           child: ConstrainedBox(
             constraints: BoxConstraints(minHeight: constraints.maxHeight),
             child: IntrinsicHeight(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // Top spacer (flexible)
                   const Spacer(flex: 2),
-
-                  // ─── CONTENT COLUMN (Centered) ───
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 24.0),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // 1. SECURE SESSION BADGE
                         FadeInAnimation(
                           duration: const Duration(milliseconds: 600),
                           child: Container(
@@ -400,16 +342,12 @@ class _IncognitoScreenState extends State<IncognitoScreen>
                           ),
                         ),
                         const SizedBox(height: 24),
-
-                        // 2. INFINITY ANIMATION (Grey/Silver) — CENTERPIECE
                         FadeInAnimation(
                           duration: const Duration(milliseconds: 1000),
                           delay: const Duration(milliseconds: 200),
                           child: _buildInfinityAnimation(constraints),
                         ),
-                        const SizedBox(height: 24), // Gap above title
-
-                        // 3. "GONE INCOGNITO" TITLE ROW
+                        const SizedBox(height: 24),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
@@ -419,12 +357,12 @@ class _IncognitoScreenState extends State<IncognitoScreen>
                                   color: Color(0xFF6B7280), size: 36),
                             ),
                             const SizedBox(width: 12),
-                            Flexible( // Prevents overflow on narrow screens
+                            Flexible(
                               child: TypingText(
                                 text: "< Gone Incognito >",
                                 style: GoogleFonts.tinos(
                                   color: const Color(0xFFE8E8E8),
-                                  fontSize: 54, // Slightly responsive default
+                                  fontSize: 54,
                                   fontWeight: FontWeight.w900,
                                 ),
                                 typingSpeed: const Duration(milliseconds: 50),
@@ -433,13 +371,10 @@ class _IncognitoScreenState extends State<IncognitoScreen>
                           ],
                         ),
                         const SizedBox(height: 16),
-
-                        // 4. DESCRIPTION TEXT
                         Container(
                           constraints: const BoxConstraints(maxWidth: 360),
                           child: TypingText(
-                            text:
-                            "      Ephemeral mode active. Conversations and uploads are end-to-end encrypted and will be purged upon exit.",
+                            text: "Ephemeral mode active. Conversations and uploads are end-to-end encrypted and will be purged upon exit.",
                             style: GoogleFonts.tinos(
                               color: AppTheme.textSecondary,
                               fontSize: 14,
@@ -466,18 +401,13 @@ class _IncognitoScreenState extends State<IncognitoScreen>
                             ),
                           ),
                         ],
-
                         const SizedBox(height: 40),
-
-                        // 5. INPUT BOX
                         FadeInAnimation(
                           duration: const Duration(milliseconds: 600),
                           delay: const Duration(milliseconds: 1200),
                           child: _buildInputBox(),
                         ),
                         const SizedBox(height: 16),
-
-                        // 6. SUGGESTION PILLS
                         FadeInAnimation(
                           duration: const Duration(milliseconds: 800),
                           delay: const Duration(milliseconds: 1400),
@@ -486,8 +416,6 @@ class _IncognitoScreenState extends State<IncognitoScreen>
                       ],
                     ),
                   ),
-
-                  // Bottom spacer (flexible) - pushes content to center
                   const Spacer(flex: 3),
                 ],
               ),
@@ -498,19 +426,13 @@ class _IncognitoScreenState extends State<IncognitoScreen>
     );
   }
 
-  // ─── NEW: Responsive Animation Wrapper ───
   Widget _buildInfinityAnimation(BoxConstraints constraints) {
-    // Responsive sizing: 120dp default, max 60% of screen width, min 80dp
     final double screenWidth = constraints.maxWidth;
     final double animSize = (screenWidth * 0.6).clamp(80.0, 140.0);
-
     return SizedBox(
       width: animSize,
-      height: animSize / 2, // Animation internal aspect ratio is 2:1 (W:H)
-      child: const InfinityAnimationIncognito(
-        // Uses defaults: ribbonColor #C8C8C8 (Silver), spineColor #F0F0F0 (Near-White)
-        // duration: 6s
-      ),
+      height: animSize / 2,
+      child: const InfinityAnimationIncognito(),
     );
   }
 
@@ -564,10 +486,6 @@ class _IncognitoScreenState extends State<IncognitoScreen>
     );
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  //  Chat Thread & Message Builders (Unchanged Logic)
-  // ═══════════════════════════════════════════════════════════════════════════
-
   Widget _buildChatThread() {
     return ListView.builder(
       controller: _scrollController,
@@ -595,8 +513,7 @@ class _IncognitoScreenState extends State<IncognitoScreen>
             ? Colors.transparent
             : AppTheme.surfaceDark.withOpacity(0.5),
         border: Border(
-            bottom:
-            BorderSide(color: Colors.white.withOpacity(0.05), width: 1)),
+            bottom: BorderSide(color: Colors.white.withOpacity(0.05), width: 1)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -687,8 +604,7 @@ class _IncognitoScreenState extends State<IncognitoScreen>
           color: const Color(0xFF2F2F2F),
           borderRadius: BorderRadius.circular(24),
           border: Border.all(
-            color: Color.lerp(
-                Colors.white10, Colors.white24, _inputGlow.value)!,
+            color: Color.lerp(Colors.white10, Colors.white24, _inputGlow.value)!,
             width: 1.0,
           ),
           boxShadow: [
@@ -801,10 +717,7 @@ class _IncognitoScreenState extends State<IncognitoScreen>
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Support Widgets (Unchanged)
-// ═══════════════════════════════════════════════════════════════════════════
-
+// Support Widgets
 class _SuggestionPill extends StatefulWidget {
   final IconData icon;
   final String label;
@@ -1019,12 +932,9 @@ class _FadeInAnimationState extends State<FadeInAnimation>
   @override
   void initState() {
     super.initState();
-    _controller =
-        AnimationController(vsync: this, duration: widget.duration);
-    final curve =
-    CurvedAnimation(parent: _controller, curve: widget.curve);
-    _opacityAnimation =
-        Tween<double>(begin: 0.0, end: 1.0).animate(curve);
+    _controller = AnimationController(vsync: this, duration: widget.duration);
+    final curve = CurvedAnimation(parent: _controller, curve: widget.curve);
+    _opacityAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(curve);
 
     if (widget.delay != null) {
       Future.delayed(widget.delay!, _controller.forward);

@@ -3,9 +3,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
 //  Public entry-point
-// ─────────────────────────────────────────────────────────────────────────────
 
 class LeftSidebarExtension {
   /// Width of the collapsed LeftSidebar — must match left_sidebar.dart.
@@ -34,9 +32,7 @@ class LeftSidebarExtension {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 //  Overlay root — owns the AnimationController for the entire enter/exit
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _SidebarExtensionOverlay extends StatefulWidget {
   final VoidCallback onClose;
@@ -150,9 +146,7 @@ class _SidebarExtensionOverlayState
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 //  The actual panel widget
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _ExtensionPanel extends StatefulWidget {
   final Future<void> Function() onClose;
@@ -215,23 +209,24 @@ class _ExtensionPanelState extends State<_ExtensionPanel> {
     );
   }
 
-  // ── Header ────────────────────────────────────────────────────────────────
   Widget _buildHeader() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 12, 10),
+      padding: const EdgeInsets.fromLTRB(14, 14, 12, 10),
       child: Row(
         children: [
-          // ← FIX: explicitly set decoration: TextDecoration.none
+          const _InfinityMLogo(size: 20),
+          const SizedBox(width: 8),
           const Expanded(
             child: Text(
-              'QuantMessage',
+              'Quant-Message',
               style: TextStyle(
                 decoration: TextDecoration.none, // ← prevents double underline
                 color: Colors.white,
-                fontSize: 17,
-                fontWeight: FontWeight.w700,
-                letterSpacing: -0.3,
+                fontSize: 15.5,
+                fontWeight: FontWeight.w600,
+                letterSpacing: -0.2,
               ),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
           _HeaderIconBtn(icon: Icons.search, onTap: () {}),
@@ -387,9 +382,136 @@ class _ExtensionPanelState extends State<_ExtensionPanel> {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 //  Reusable components — ALL text widgets include decoration: TextDecoration.none
-// ═══════════════════════════════════════════════════════════════════════════
+
+//  Infinity / "M" wordmark glyph
+//
+// A static logo built with the same layered-glow painting technique used in
+// InfinityAnimation (outer blur glow → mid glow band → crisp core ribbon →
+// bright spine highlight), but frozen (no AnimationController) and shaped so
+// the single continuous stroke reads as both an infinity loop (∞) and the
+// letter "M": the two outer strokes rise like the legs of an M, and instead
+// of meeting at a plain V-notch, they cross through a small figure-eight
+// twist in the middle — the "infinity" sits where the M's valley would be.
+//
+// Reference file: lib/screens/animations/animated_effects/infinity_animation.dart
+// (used only as a visual/technique reference — not modified).
+class _InfinityMLogo extends StatelessWidget {
+  final double size;
+  final Color color;
+
+  const _InfinityMLogo({
+    this.size = 20,
+    this.color = Colors.white,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: size,
+      height: size,
+      child: CustomPaint(
+        painter: _InfinityMLogoPainter(color: color),
+      ),
+    );
+  }
+}
+
+class _InfinityMLogoPainter extends CustomPainter {
+  final Color color;
+  _InfinityMLogoPainter({required this.color});
+
+  /// Builds the single-stroke "M through an infinity twist" path,
+  /// normalised to a 24x24 box and then scaled to [size].
+  Path _buildPath(Size size) {
+    final double s = size.width / 24.0;
+    Offset p(double x, double y) => Offset(x * s, y * s);
+
+    final path = Path();
+
+    // Left leg: bottom-left corner rising to the top-left peak of the "M".
+    path.moveTo(p(2, 19).dx, p(2, 19).dy);
+    path.lineTo(p(3.2, 5.4).dx, p(3.2, 5.4).dy);
+
+    // First half of the infinity twist: sweeps right and loops down through
+    // the centre — this is the left lobe of the ∞ sitting in the M's valley.
+    path.cubicTo(
+      p(6.5, 15.5).dx, p(6.5, 15.5).dy,
+      p(15.5, 12.5).dx, p(15.5, 12.5).dy,
+      p(12, 12.2).dx, p(12, 12.2).dy,
+    );
+
+    // Second half of the twist: crosses back the other way — the right lobe
+    // of the ∞ — before rising into the M's right peak.
+    path.cubicTo(
+      p(8.5, 11.9).dx, p(8.5, 11.9).dy,
+      p(17.5, 8.5).dx, p(17.5, 8.5).dy,
+      p(20.8, 5.4).dx, p(20.8, 5.4).dy,
+    );
+
+    // Right leg: top-right peak descending to the bottom-right corner.
+    path.lineTo(p(22, 19).dx, p(22, 19).dy);
+
+    return path;
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = _buildPath(size);
+
+    // 1. Outer glow (soft, wide, faint) — mirrors the deep shadow/outer
+    //    glow layer in InfinityAnimation.
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = color.withOpacity(0.20)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = size.width * 0.20
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, size.width * 0.35),
+    );
+
+    // 2. Mid glow band — narrower, a bit brighter.
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = color.withOpacity(0.35)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = size.width * 0.13
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, size.width * 0.14),
+    );
+
+    // 3. Crisp core ribbon — the actual visible glyph stroke.
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = color.withOpacity(0.88)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = size.width * 0.11
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round,
+    );
+
+    // 4. Bright spine highlight down the centre of the stroke — mirrors the
+    //    near-white spine pass in InfinityAnimation for a subtle 3-D sheen.
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = Colors.white.withOpacity(0.55)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = size.width * 0.035
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_InfinityMLogoPainter oldDelegate) =>
+      oldDelegate.color != color;
+}
 
 class _HeaderIconBtn extends StatefulWidget {
   final IconData icon;
@@ -667,7 +789,7 @@ class _FooterIconBtnState extends State<_FooterIconBtn> {
   }
 }
 
-// ── Staggered fade-in for list items ─────────────────────────────────────
+//  Staggered fade-in for list items
 
 class _StaggeredFadeItem extends StatefulWidget {
   final Widget child;

@@ -7,16 +7,7 @@ import 'package:flutter/material.dart';
 import '../../core/chat_message.dart';
 import '../../core/attachment_model.dart';
 
-/// ═══════════════════════════════════════════════════════════════════════════
-///  Horizontal scrollable strip of pending attachments above the input.
-///
-///  Now:
-///  • Uses LayoutBuilder so it adapts to any orientation
-///  • Clamps chip size to avoid RenderFlex overflow
-///  • Caches images at fixed resolution (no rebuild jank)
-///  • Wraps overlay in ClipRRect so progress bar respects border radius
-/// ═══════════════════════════════════════════════════════════════════════════
-
+// Horizontal scrollable strip of pending attachments above the input.
 class AttachmentPreviewStrip extends StatelessWidget {
   final List<Attachment> attachments;
   final ValueChanged<int> onRemove;
@@ -27,10 +18,10 @@ class AttachmentPreviewStrip extends StatelessWidget {
     required this.onRemove,
   });
 
-  // ← Constant chip dimensions — single source of truth
+  // Constant chip dimensions
   static const double _chipSize = 72.0;
   static const double _chipSpacing = 8.0;
-  static const double _stripHeight = _chipSize + 8.0; // small padding
+  static const double _stripHeight = _chipSize + 8.0;
 
   @override
   Widget build(BuildContext context) {
@@ -42,12 +33,6 @@ class AttachmentPreviewStrip extends StatelessWidget {
         height: _stripHeight,
         child: LayoutBuilder(
           builder: (context, constraints) {
-            // Determine how many chips can fit on screen (for placeholder sizing)
-            final chipsFitting =
-            ((constraints.maxWidth - 8) / (_chipSize + _chipSpacing))
-                .floor()
-                .clamp(1, 20);
-
             return ListView.separated(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -72,10 +57,7 @@ class AttachmentPreviewStrip extends StatelessWidget {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Individual chip — uses ClipRRect + safe positioned overlay
-// ═══════════════════════════════════════════════════════════════════════════
-
+// Individual chip using ClipRRect and overlays
 class _AttachmentChip extends StatelessWidget {
   final Attachment attachment;
   final VoidCallback onRemove;
@@ -89,22 +71,21 @@ class _AttachmentChip extends StatelessWidget {
     return SizedBox(
       width: _size,
       height: _size,
-      // ← KEY: ClipRRect wraps everything so nothing overflows the rounded edge
       child: ClipRRect(
         borderRadius: BorderRadius.circular(10),
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // ── 1. Base thumbnail ───────────────────────────────────────
+            // 1. Base thumbnail
             _buildThumbnail(),
 
-            // ── 2. Uploading/processing overlay ────────────────────────
+            // 2. Uploading overlay
             if (_isInFlight) _buildUploadingOverlay(),
 
-            // ── 3. Failed overlay ──────────────────────────────────────
+            // 3. Failed overlay
             if (attachment.status == UploadStatus.failed) _buildFailedOverlay(),
 
-            // ── 4. Remove button (top-right, safe inside bounds) ───────
+            // 4. Remove button
             Positioned(
               top: 2,
               right: 2,
@@ -116,29 +97,28 @@ class _AttachmentChip extends StatelessWidget {
     );
   }
 
-  bool get _isInFlight =>
-      attachment.status == UploadStatus.uploading ||
-          attachment.status == UploadStatus.processing;
+  // FIXED: Removed .processing as it no longer exists in UploadStatus enum
+  bool get _isInFlight => attachment.status == UploadStatus.uploading;
 
-  // ── Thumbnail renderer ────────────────────────────────────────────────────
+  // Thumbnail renderer
   Widget _buildThumbnail() {
-    if (attachment.isImage) {
-      // Local file first
+    // FIXED: Replaced .isImage with enum check
+    if (attachment.type == AttachmentType.image) {
+      // Local file first for immediate preview
       final local = attachment.localFile;
       if (local != null && local.existsSync()) {
         return Image.file(
           local,
           fit: BoxFit.cover,
-          // ← Cache at 2x chip size for retina sharpness, no jank
           cacheWidth: 256,
           errorBuilder: (_, __, ___) => _placeholder(Icons.broken_image_outlined),
         );
       }
-      // Remote thumbnail
-      final thumb = attachment.thumbnailUrl;
-      if (thumb != null && thumb.isNotEmpty) {
+      // Remote thumbnail using the new .url property from attachment_model.dart
+      final url = attachment.url;
+      if (url != null && url.isNotEmpty) {
         return CachedNetworkImage(
-          imageUrl: thumb,
+          imageUrl: url,
           fit: BoxFit.cover,
           memCacheWidth: 256,
           placeholder: (_, __) => _placeholder(Icons.image_outlined),
@@ -148,7 +128,8 @@ class _AttachmentChip extends StatelessWidget {
       return _placeholder(Icons.image_outlined);
     }
 
-    if (attachment.isPdf) {
+    // FIXED: Replaced .isPdf with enum check
+    if (attachment.type == AttachmentType.pdf) {
       return Container(
         color: AttachmentColors.pdfBg,
         child: const Center(
@@ -177,9 +158,8 @@ class _AttachmentChip extends StatelessWidget {
     return _placeholder(Icons.insert_drive_file_outlined);
   }
 
-  // ── Overlays ─────────────────────────────────────────────────────────────
+  // Uploading progress overlay
   Widget _buildUploadingOverlay() {
-    final isUploading = attachment.status == UploadStatus.uploading;
     final progress = attachment.progress.clamp(0.0, 1.0);
 
     return Container(
@@ -188,11 +168,9 @@ class _AttachmentChip extends StatelessWidget {
         child: SizedBox(
           width: 26,
           height: 26,
-          child: isUploading
-              ? Stack(
+          child: Stack(
             alignment: Alignment.center,
             children: [
-              // Background ring
               SizedBox(
                 width: 26,
                 height: 26,
@@ -204,20 +182,17 @@ class _AttachmentChip extends StatelessWidget {
                   ),
                 ),
               ),
-              // Progress arc
               SizedBox(
                 width: 26,
                 height: 26,
                 child: CircularProgressIndicator(
                   strokeWidth: 2.5,
                   value: progress,
-                  valueColor:
-                  const AlwaysStoppedAnimation<Color>(Colors.white),
+                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
                 ),
               ),
-              // Percentage text
               Text(
-                '${(progress * 100).toInt()}',
+                '${(progress * 100).toInt()}%',
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 8,
@@ -225,10 +200,6 @@ class _AttachmentChip extends StatelessWidget {
                 ),
               ),
             ],
-          )
-              : const CircularProgressIndicator(
-            strokeWidth: 2.5,
-            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
           ),
         ),
       ),
@@ -256,10 +227,7 @@ class _AttachmentChip extends StatelessWidget {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Remove button — small, tappable, with hit-test padding
-// ═══════════════════════════════════════════════════════════════════════════
-
+// Remove button widget
 class _RemoveButton extends StatelessWidget {
   final VoidCallback onTap;
   const _RemoveButton({required this.onTap});
@@ -268,7 +236,6 @@ class _RemoveButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: Colors.transparent,
-      // ← Expands the hit area so it's easy to tap without overflow
       child: InkWell(
         onTap: onTap,
         customBorder: const CircleBorder(),
