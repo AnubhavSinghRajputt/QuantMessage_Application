@@ -19,6 +19,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/app_theme.dart';
 import '../core/chat_message.dart';
 import '../core/attachment_model.dart';
+import '../core/config.dart' as app_config; // FIXED: Alias used to solve Config name conflict
 import '../services/quant_space_api.dart';
 import 'widgets/attachment_preview.dart';
 import 'widgets/attachment_thumbnail.dart';
@@ -32,8 +33,9 @@ class IncognitoScreen extends StatefulWidget {
 }
 
 class _IncognitoScreenState extends State<IncognitoScreen> with TickerProviderStateMixin {
-  // Supabase user
-  User? get _currentUser => Supabase.instance.client.auth.currentUser;
+  final SupabaseClient _supabase = Supabase.instance.client;
+
+  User? get _currentUser => _supabase.auth.currentUser;
   String? get _userEmail => _currentUser?.email;
 
   final TextEditingController _controller = TextEditingController();
@@ -100,15 +102,12 @@ class _IncognitoScreenState extends State<IncognitoScreen> with TickerProviderSt
     Navigator.of(context).pop();
   }
 
-  // Attachment handlers
+  // ──────────────────────────────────────────────────────────────────────────
+  // ATTACHMENT LOGIC
+  // ──────────────────────────────────────────────────────────────────────────
+
   void _addAttachment(Uint8List bytes, String filename, String mimeType) {
-    final attachment = Attachment(
-      filename: filename,
-      type: _typeFromMime(mimeType),
-      mimeType: mimeType,
-      sizeBytes: bytes.length,
-      status: UploadStatus.pending,
-    );
+    final attachment = AttachmentX.fromBytes(bytes, filename, mimeType);
 
     setState(() => _pendingAttachments.add(attachment));
 
@@ -117,18 +116,10 @@ class _IncognitoScreenState extends State<IncognitoScreen> with TickerProviderSt
       setState(() {
         final idx = _pendingAttachments.indexWhere((a) => a.filename == filename);
         if (idx != -1) {
-          // FIXED: Use copyWith instead of direct setter to avoid 'final' error
           _pendingAttachments[idx] = _pendingAttachments[idx].copyWith(localFile: file);
         }
       });
     });
-  }
-
-  AttachmentType _typeFromMime(String mime) {
-    if (mime.startsWith('image/')) return AttachmentType.image;
-    if (mime == 'application/pdf') return AttachmentType.pdf;
-    if (mime.startsWith('text/')) return AttachmentType.text;
-    return AttachmentType.unknown;
   }
 
   Future<File?> _writeTempFile(Uint8List bytes, String filename) async {
@@ -138,6 +129,7 @@ class _IncognitoScreenState extends State<IncognitoScreen> with TickerProviderSt
       await tempFile.writeAsBytes(bytes, flush: true);
       return tempFile;
     } catch (e) {
+      debugPrint('Temp file error: $e');
       return null;
     }
   }
@@ -150,7 +142,6 @@ class _IncognitoScreenState extends State<IncognitoScreen> with TickerProviderSt
     setState(() => _pendingAttachments.removeAt(index));
   }
 
-  // Logic to upload a file using the new QuantSpaceApi
   Future<Attachment?> _uploadPendingAttachment(Attachment att) async {
     setState(() {
       final idx = _pendingAttachments.indexOf(att);
@@ -162,7 +153,6 @@ class _IncognitoScreenState extends State<IncognitoScreen> with TickerProviderSt
     try {
       if (att.localFile == null) return null;
 
-      // Use the unified API upload method
       final result = await _api.uploadFile(
         att.localFile!.path,
         conversationId: _ephemeralSessionId!,
@@ -193,7 +183,9 @@ class _IncognitoScreenState extends State<IncognitoScreen> with TickerProviderSt
     }
   }
 
-  // Send handler integrated with Flowise logic
+  // ──────────────────────────────────────────────────────────────────────────
+  // INTEGRATED: Send handler
+  // ──────────────────────────────────────────────────────────────────────────
   Future<void> _handleSend() async {
     final text = _controller.text.trim();
     final hasAttachments = _pendingAttachments.isNotEmpty;
@@ -202,12 +194,19 @@ class _IncognitoScreenState extends State<IncognitoScreen> with TickerProviderSt
     _emptyCtrl.reset();
 
     final pendingSnapshot = List<Attachment>.from(_pendingAttachments);
+
+    // FIXED: Provide conversationId, senderId, and createdAt to satisfy ChatMessage model
+    final userMsg = ChatMessage(
+      text: text,
+      isUser: true,
+      conversationId: _ephemeralSessionId!,
+      senderId: 'ghost_user',
+      createdAt: DateTime.now(),
+      attachments: pendingSnapshot,
+    );
+
     setState(() {
-      _messages.add(ChatMessage(
-        text: text,
-        isUser: true,
-        attachments: pendingSnapshot,
-      ));
+      _messages.add(userMsg);
       _isTyping = true;
       _pendingAttachments.clear();
     });
@@ -217,26 +216,28 @@ class _IncognitoScreenState extends State<IncognitoScreen> with TickerProviderSt
     try {
       String finalPrompt = text;
 
-      // Upload all pending attachments first and append their URLs to the prompt
       for (final att in pendingSnapshot) {
         if (att.localFile != null) {
           final result = await _uploadPendingAttachment(att);
-          if (result != null && result.url != null) {
-            finalPrompt += "\n[File: ${result.url}]";
+          if (result != null) {
+            finalPrompt += result.promptFragment;
           }
         } else if (att.url != null) {
-          finalPrompt += "\n[File: ${att.url}]";
+          finalPrompt += att.promptFragment;
         }
       }
 
-      // Call the Flowise Brain using the ephemeral session ID
       final response = await _api.getAIResponse(finalPrompt, _ephemeralSessionId!);
 
       if (!mounted) return;
+
       setState(() {
         _messages.add(ChatMessage(
           text: response,
           isUser: false,
+          conversationId: _ephemeralSessionId!,
+          senderId: 'ghost_agent',
+          createdAt: DateTime.now(),
           modelName: 'GHOST AI',
         ));
       });
@@ -244,8 +245,11 @@ class _IncognitoScreenState extends State<IncognitoScreen> with TickerProviderSt
       if (!mounted) return;
       setState(() {
         _messages.add(ChatMessage(
-          text: "🚨 **System Error**: ${e.toString()}",
+          text: "🚨 **Ghost System Error**: ${e.toString()}",
           isUser: false,
+          conversationId: _ephemeralSessionId!,
+          senderId: 'system',
+          createdAt: DateTime.now(),
         ));
       });
     } finally {
@@ -311,6 +315,7 @@ class _IncognitoScreenState extends State<IncognitoScreen> with TickerProviderSt
   Widget _buildEmptyStateResponsive() {
     return LayoutBuilder(
       builder: (context, constraints) {
+        var constH;
         return SingleChildScrollView(
           physics: const BouncingScrollPhysics(),
           child: ConstrainedBox(
@@ -374,7 +379,7 @@ class _IncognitoScreenState extends State<IncognitoScreen> with TickerProviderSt
                         Container(
                           constraints: const BoxConstraints(maxWidth: 360),
                           child: TypingText(
-                            text: "Ephemeral mode active. Conversations and uploads are end-to-end encrypted and will be purged upon exit.",
+                            text: "Ephemeral mode active. Conversations and uploads are handled via ghost session and will be purged upon exit.",
                             style: GoogleFonts.tinos(
                               color: AppTheme.textSecondary,
                               fontSize: 14,
@@ -386,7 +391,7 @@ class _IncognitoScreenState extends State<IncognitoScreen> with TickerProviderSt
                           ),
                         ),
                         if (_userEmail != null) ...[
-                          const SizedBox(height: 12),
+                          constH, SizedBox(height: 12),
                           FadeInAnimation(
                             duration: const Duration(milliseconds: 1000),
                             delay: const Duration(milliseconds: 1500),
@@ -717,7 +722,7 @@ class _IncognitoScreenState extends State<IncognitoScreen> with TickerProviderSt
   }
 }
 
-// Support Widgets
+// Support Widgets (Retained for UI consistency)
 class _SuggestionPill extends StatefulWidget {
   final IconData icon;
   final String label;
@@ -826,7 +831,7 @@ class _ChatParticlePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _ChatParticlePainter oldDelegate) => false;
 }
 
 class ButtonBulge extends StatefulWidget {

@@ -3,17 +3,16 @@ import 'package:flutter/cupertino.dart';
 import 'dart:ui';
 import 'dart:math' as math;
 import 'package:google_fonts/google_fonts.dart';
+import 'package:supabase_flutter/supabase_flutter.dart'; // INTEGRATED: For Auth checks
 
 import '../core/app_theme.dart';
 import 'app_bar.dart';
 import 'chat_screen.dart';
 import 'history_screen.dart';
 import 'incogonito_screen.dart';
-// import 'incogonito_screen.dart'; // Removed duplicate import
 import 'signin_screen.dart';
 import 'signup_screen.dart';
-import 'settings_screen.dart';
-
+import 'settings_screen.dart'; // INTEGRATED: Now includes showSettingsPopup
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -27,22 +26,33 @@ class _HomeScreenState extends State<HomeScreen>
   int _currentIndex = 0;
   int _previousIndex = 0;
 
-  late final List<Widget> _pages;
-
-  @override
-  void initState() {
-    super.initState();
-    _pages = [
-      DashboardTab(onStartChat: () => _onItemSelected(1)),
-      const ChatScreen(),
-      const IncognitoScreen(),
-      const HistoryScreen(),
-      const SettingsScreen(),
-    ];
-  }
+  // We use a getter for pages so they can be rebuilt if the auth state changes
+  List<Widget> get _pages => [
+    DashboardTab(onStartChat: () => _onItemSelected(1)),
+    const ChatScreen(),
+    const IncognitoScreen(),
+    const HistoryScreen(),
+    const SettingsScreen(),
+  ];
 
   void _onItemSelected(int index) {
     if (index == _currentIndex) return;
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // AUTH GUARD: Protect sensitive tabs (Chat, History)
+    // ──────────────────────────────────────────────────────────────────────────
+    if (index == 1 || index == 3) {
+      final session = Supabase.instance.client.auth.currentSession;
+      if (session == null) {
+        // User is not logged in, redirect to Sign In instead of switching tab
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const SignInScreen()),
+        );
+        return; // Stop the tab switch
+      }
+    }
+
     setState(() {
       _previousIndex = _currentIndex;
       _currentIndex = index;
@@ -247,7 +257,6 @@ class _DashboardTabState extends State<DashboardTab>
                       child: _ShimmerText(
                         controller: _shimmerCtrl,
                         text: "< Welcome to QUANTMESSAGE >",
-                        // MODIFIED SECTION BELOW
                         style: GoogleFonts.tinos(
                           fontSize: 45,
                           fontWeight: FontWeight.w900,
@@ -524,7 +533,8 @@ class _SettingsButton extends StatelessWidget {
       onTapDown: (_) => btnCtrl.forward(),
       onTapUp: (_) async {
         await btnCtrl.reverse();
-        Navigator.push(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const SettingsScreen(), transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child)));
+        // INTEGRATED: Call the popup directly instead of pushing a route
+        showSettingsPopup(context);
       },
       onTapCancel: () => btnCtrl.reverse(),
       child: ScaleTransition(

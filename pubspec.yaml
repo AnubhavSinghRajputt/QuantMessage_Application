@@ -1,4 +1,4 @@
-name: q_ai_mob_testt
+name: QuantMessage_Application
 description: QuantMessage.Ai — Multi-Agent AI Messaging Hub
 publish_to: 'none'
 version: 1.0.0+1
@@ -13,26 +13,26 @@ dependencies:
   cupertino_icons: ^1.0.8
 
   # ──────────────────────────────────────────────────────────────
-  # 🔐 SECURITY & CONFIG (Essential for API Keys)
+  # 🔐 SECURITY & CONFIG (Essential for API Keys & .env)
   # ──────────────────────────────────────────────────────────────
-  flutter_dotenv: ^5.2.1 # Used to store Flowise URL and API Key securely
+  flutter_dotenv: ^5.2.1      # Loads SUPABASE_URL, FLOWISE_URL, etc.
 
   # ──────────────────────────────────────────────────────────────
   # 🌐 NETWORKING & AI INTEGRATION
   # ──────────────────────────────────────────────────────────────
-  dio: ^5.4.3+1             # Primary for Flowise API calls
-  http: ^1.2.0
-  web_socket_channel: ^3.0.1 # For streaming AI responses (word-by-word)
+  dio: ^5.4.3+1               # Used in QuantSpaceApi and UploadService
+  http: ^1.2.0                # Fallback networking
+  web_socket_channel: ^3.0.1   # For future streaming AI responses
 
   # ──────────────────────────────────────────────────────────────
-  # ☁️ SUPABASE & AUTH
+  # ☁️ SUPABASE & AUTH (The Core Backend)
   # ──────────────────────────────────────────────────────────────
-  supabase_flutter: ^2.10.0
+  supabase_flutter: ^2.10.0   # Handles Auth, Database, and Storage
 
   # ──────────────────────────────────────────────────────────────
   # 🧠 STATE MANAGEMENT & PERSISTENCE
   # ──────────────────────────────────────────────────────────────
-  flutter_riverpod: ^2.5.1   # Managing AI loading states and chat history
+  flutter_riverpod: ^2.5.1    # Integrated in main.dart for state provider
   shared_preferences: ^2.2.3
   flutter_secure_storage: ^9.2.4
   hive: ^2.2.3
@@ -41,12 +41,12 @@ dependencies:
   # ──────────────────────────────────────────────────────────────
   # 📱 RESPONSIVE UI & ANIMATIONS
   # ──────────────────────────────────────────────────────────────
-  flutter_screenutil: ^5.9.3 # ADDED: Makes UI adapt to any screen size (Mobile/Web/Tablet)
-  google_fonts: ^6.2.1
-  flutter_markdown: ^0.7.4    # Essential for rendering AI code blocks and bold text
-  fl_chart: ^1.0.0           # For Quant financial charts
-  shimmer: ^3.0.0            # For "Loading" skeletons
-  animate_do: ^3.3.4
+  flutter_screenutil: ^5.9.3
+  google_fonts: ^6.2.1        # Used across all screens for Outfit/Tinos fonts
+  flutter_markdown: ^0.7.4    # Used in Chat and Incognito screens for AI responses
+  fl_chart: ^1.0.0
+  shimmer: ^3.0.0
+  animate_do: ^3.3.4          # Used in Settings and History screens for FadeInUp
   lottie: ^3.1.2
   cached_network_image: ^3.4.1
 
@@ -57,7 +57,7 @@ dependencies:
   image_picker_for_web: ^3.0.0
   file_picker: ^8.1.4
   syncfusion_flutter_pdfviewer: ^27.1.48
-  mime: ^1.0.6
+  mime: ^1.0.6                # Used in UploadService to determine file types
 
   # ──────────────────────────────────────────────────────────────
   # 🎙️ HARDWARE & VOICE
@@ -69,13 +69,13 @@ dependencies:
   speech_to_text: ^7.3.0
 
   # ──────────────────────────────────────────────────────────────
-  # 🛠️ UTILITIES
+  # 🛠️ UTILITIES (Essential for History & File paths)
   # ──────────────────────────────────────────────────────────────
-  intl: ^0.19.0
+  intl: ^0.19.0               # CRITICAL: Used in HistoryScreen for DateFormat
   uuid: ^4.4.0
   jwt_decoder: ^2.0.1
-  path_provider: ^2.1.3
-  path: ^1.9.0
+  path_provider: ^2.1.3      # CRITICAL: Used in IncognitoScreen for temp files
+  path: ^1.9.0               # CRITICAL: Used in QuantSpaceApi for filenames
   file_selector: ^1.0.3
 
   # ──────────────────────────────────────────────────────────────
@@ -104,4 +104,4 @@ flutter:
   generate: true
 
   assets:
-    - .env  # This is where you will put your Flowise URL and API Key
+    - .env  # MUST be here for main.dart to load credentials

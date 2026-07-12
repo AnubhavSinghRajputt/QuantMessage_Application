@@ -16,17 +16,19 @@ import 'package:http_parser/http_parser.dart';
 import 'package:mime/mime.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide MultipartFile;
 
-// IMPORTED: These solve the "Undefined class" and "Not a type" errors
+// IMPORTANT: Ensure these files exist in your project
 import '../core/chat_message.dart';
 import '../core/attachment_model.dart';
 import 'quant_space_api.dart';
 
 class UploadService {
   // Configuration
+  // This fallback is used only if BACKEND_URL is not found in .env
   static const String _defaultBaseUrl = 'https://your-app.up.railway.app/api/v1';
 
   String get _baseUrl {
-    final envUrl = dotenv.maybeGet('BACKEND_URL');
+    // Now correctly pulls from the .env file we set up in main.dart
+    final envUrl = dotenv.env['BACKEND_URL'] ?? dotenv.maybeGet('BACKEND_URL');
     if (envUrl != null && envUrl.isNotEmpty) return envUrl;
     return _defaultBaseUrl;
   }
@@ -35,14 +37,14 @@ class UploadService {
   final SupabaseClient _supabase;
   final Dio _dio;
   final http.Client _fallbackClient;
-  final QuantSpaceApi _quantApi; // Integration with the new API service
+  final QuantSpaceApi _quantApi;
 
   UploadService({
     SupabaseClient? supabase,
     Dio? dio,
     http.Client? fallbackClient,
     QuantSpaceApi? quantApi,
-  })  : _supabase = supabase ?? Supabase.instance.client,
+  })  : _supabase = supabase ?? Supabase.instance.client, // Uses the singleton from main.dart
         _dio = dio ??
             Dio(
               BaseOptions(
@@ -53,6 +55,7 @@ class UploadService {
             ),
         _fallbackClient = fallbackClient ?? http.Client(),
         _quantApi = quantApi ?? QuantSpaceApi() {
+    // Add the auth interceptor to automatically attach the Supabase token to every Dio request
     _dio.interceptors.add(_SupabaseAuthInterceptor(_supabase));
   }
 
@@ -84,7 +87,7 @@ class UploadService {
     onProgress?.call(0.0);
 
     try {
-      // Use the already verified and working upload logic from QuantSpaceApi
+      // Use the QuantSpaceApi to handle the actual Supabase Storage upload
       final result = await _quantApi.uploadFile(
           file.path,
           conversationId: conversationId
@@ -93,13 +96,13 @@ class UploadService {
       if (result['status'] == 'success') {
         onProgress?.call(1.0);
 
-        // Return the Attachment model compatible with chat_screen.dart
+        // Return the Attachment model compatible with your UI
         return Attachment(
           filename: file.path.split('/').last,
           type: _typeFromMime(lookupMimeType(file.path) ?? 'application/octet-stream'),
           mimeType: lookupMimeType(file.path) ?? 'application/octet-stream',
           sizeBytes: await file.length(),
-          url: result['url'], // The public Supabase URL
+          url: result['url'],
           status: UploadStatus.success,
           localFile: file,
           progress: 1.0,
@@ -108,12 +111,13 @@ class UploadService {
         throw Exception(result['message'] ?? 'Upload failed');
       }
     } catch (e) {
+      debugPrint('[UploadService] File upload error: $e');
       throw Exception('Upload failed: $e');
     }
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // CHAT MESSAGE (Integrated with Flowise)
+  // CHAT MESSAGE (Integrated with Flowise via QuantSpaceApi)
   // ──────────────────────────────────────────────────────────────────────────
 
   Future<Map<String, dynamic>> sendMessageWithAttachments({
@@ -123,8 +127,7 @@ class UploadService {
     bool isIncognito = false,
     String? agentOverride,
   }) async {
-    // Instead of using a separate fallback client, we use the Flowise logic
-    // Construct the prompt by adding attachment URLs (as done in chat_screen.dart)
+    // Construct the prompt by appending attachment URLs for the AI to "see" them
     String finalMessage = message;
     for (var a in attachments) {
       if (a.url != null) {
@@ -132,7 +135,7 @@ class UploadService {
       }
     }
 
-    // Call the QuantSpaceApi getAIResponse logic
+    // Use the centralized userId from Supabase
     final userId = _supabase.auth.currentUser?.id ?? "guest_user";
     final responseText = await _quantApi.getAIResponse(finalMessage, userId);
 
@@ -153,8 +156,6 @@ class UploadService {
     bool isIncognito = false,
     String? agentOverride,
   }) async* {
-    // Flowise typically handles streaming via its own endpoint
-    // To keep the app stable, we redirect this to the standard AI response
     final userId = _supabase.auth.currentUser?.id ?? "guest_user";
     final response = await _quantApi.getAIResponse(message, userId);
     yield {'content': response, 'conversation_id': conversationId};
@@ -192,7 +193,7 @@ class UploadService {
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // Conversation history & Settings (Legacy Support)
+  // Conversation history & Settings
   // ──────────────────────────────────────────────────────────────────────────
 
   Future<List<Map<String, dynamic>>> getHistory({int limit = 50}) async {

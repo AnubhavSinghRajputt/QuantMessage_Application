@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:animate_do/animate_do.dart';
 import 'dart:ui';
+import 'package:supabase_flutter/supabase_flutter.dart'; // INTEGRATED
 
 import '../core/app_theme.dart';
-
 
 Future<void> showSettingsPopup(BuildContext context) {
   return showGeneralDialog(
@@ -41,10 +41,16 @@ class _SettingsDialog extends StatefulWidget {
 }
 
 class _SettingsDialogState extends State<_SettingsDialog> {
+  final SupabaseClient _supabase = Supabase.instance.client; // INTEGRATED
   int _selectedNavIndex = 0;
   final TextEditingController _searchController = TextEditingController();
+  final TextEditingController _nameController = TextEditingController();
 
-  // --- State for various settings ---
+  // --- User Data State ---
+  Map<String, dynamic>? _userProfile;
+  bool _isLoading = true;
+
+  // --- UI State for various settings ---
   bool _isDarkMode = true;
   bool _notificationsEnabled = true;
   bool _soundEnabled = false;
@@ -61,7 +67,6 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     Colors.tealAccent,
   ];
 
-  // Navigation items matching the image's sidebar
   final List<_NavItem> _navItems = [
     _NavItem(icon: Icons.tune_rounded, label: 'General'),
     _NavItem(icon: Icons.person_outline_rounded, label: 'Account'),
@@ -76,15 +81,74 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   final List<String> _motionOptions = ['Default', 'Reduced', 'None'];
 
   @override
+  void initState() {
+    super.initState();
+    _loadUserProfile();
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  //  SUPABASE INTEGRATIONS
+  // ──────────────────────────────────────────────────────────────────────────
+
+  Future<void> _loadUserProfile() async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) return;
+
+      // Fetch the profile from the 'profiles' table we created in the SQL steps
+      final data = await _supabase
+          .from('profiles')
+          .select()
+          .eq('id', user.id)
+          .single();
+
+      setState(() {
+        _userProfile = data;
+        _nameController.text = data['full_name'] ?? '';
+        _isLoading = false;
+      });
+    } catch (e) {
+      debugPrint('Error loading profile: $e');
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _updateFullName(String newName) async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) return;
+
+      await _supabase
+          .from('profiles')
+          .update({'full_name': newName})
+          .eq('id', user.id);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Profile updated successfully')),
+      );
+    } catch (e) {
+      debugPrint('Update Error: $e');
+    }
+  }
+
+  Future<void> _handleLogout() async {
+    await _supabase.auth.signOut();
+    if (mounted) {
+      Navigator.of(context).pop(); // Close settings
+      // Note: Use your app's navigation to go back to SignInScreen here
+    }
+  }
+
+  @override
   void dispose() {
     _searchController.dispose();
+    _nameController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
-    // Dialog takes up ~75% width, ~80% height, capped at reasonable maxes
     final dialogWidth = (size.width * 0.78).clamp(340.0, 820.0);
     final dialogHeight = (size.height * 0.82).clamp(400.0, 620.0);
 
@@ -102,28 +166,15 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               borderRadius: BorderRadius.circular(20),
               border: Border.all(color: Colors.white.withOpacity(0.08)),
               boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.6),
-                  blurRadius: 60,
-                  spreadRadius: 10,
-                ),
-                BoxShadow(
-                  color: AppTheme.primaryRed.withOpacity(0.04),
-                  blurRadius: 80,
-                  spreadRadius: -10,
-                ),
+                BoxShadow(color: Colors.black.withOpacity(0.6), blurRadius: 60, spreadRadius: 10),
+                BoxShadow(color: AppTheme.primaryRed.withOpacity(0.04), blurRadius: 80, spreadRadius: -10),
               ],
             ),
             clipBehavior: Clip.antiAlias,
             child: Row(
               children: [
-                // ========== LEFT SIDEBAR ==========
                 _buildSidebar(dialogHeight),
-
-                // ========== VERTICAL DIVIDER ==========
                 Container(width: 1, color: Colors.white.withOpacity(0.06)),
-
-                // ========== RIGHT CONTENT ==========
                 Expanded(child: _buildContentPane()),
               ],
             ),
@@ -140,7 +191,6 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Search bar
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 18, 14, 6),
             child: Container(
@@ -161,16 +211,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                       style: GoogleFonts.outfit(color: Colors.white70, fontSize: 13),
                       decoration: InputDecoration(
                         hintText: 'Search',
-                        hintStyle: GoogleFonts.outfit(
-                          color: Colors.white.withOpacity(0.25),
-                          fontSize: 13,
-                        ),
+                        hintStyle: GoogleFonts.outfit(color: Colors.white.withOpacity(0.25), fontSize: 13),
                         border: InputBorder.none,
                         isDense: true,
                         contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                        filled: false,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
                       ),
                     ),
                   ),
@@ -178,22 +222,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               ),
             ),
           ),
-
-          // "Settings" label
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-            child: Text(
-              'Settings',
-              style: GoogleFonts.outfit(
-                color: Colors.white.withOpacity(0.35),
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 1.2,
-              ),
-            ),
+            child: Text('Settings', style: GoogleFonts.outfit(color: Colors.white.withOpacity(0.35), fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 1.2)),
           ),
-
-          // Nav items
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -209,31 +241,14 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                     margin: const EdgeInsets.only(bottom: 2),
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
-                      color: isSelected
-                          ? Colors.white.withOpacity(0.08)
-                          : Colors.transparent,
+                      color: isSelected ? Colors.white.withOpacity(0.08) : Colors.transparent,
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Row(
                       children: [
-                        Icon(
-                          item.icon,
-                          size: 17,
-                          color: isSelected
-                              ? AppTheme.primaryRed
-                              : Colors.white.withOpacity(0.45),
-                        ),
+                        Icon(item.icon, size: 17, color: isSelected ? AppTheme.primaryRed : Colors.white.withOpacity(0.45)),
                         const SizedBox(width: 10),
-                        Text(
-                          item.label,
-                          style: GoogleFonts.outfit(
-                            color: isSelected
-                                ? Colors.white
-                                : Colors.white.withOpacity(0.55),
-                            fontSize: 13.5,
-                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                          ),
-                        ),
+                        Text(item.label, style: GoogleFonts.outfit(color: isSelected ? Colors.white : Colors.white.withOpacity(0.55), fontSize: 13.5, fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400)),
                       ],
                     ),
                   ),
@@ -251,7 +266,6 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       color: const Color(0xFF1A1A1A),
       child: Column(
         children: [
-          // Top bar with close button
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 14, 14, 0),
             child: Row(
@@ -262,22 +276,13 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                   borderRadius: BorderRadius.circular(8),
                   child: Container(
                     padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.06),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(
-                      Icons.close_rounded,
-                      color: Colors.white.withOpacity(0.5),
-                      size: 18,
-                    ),
+                    decoration: BoxDecoration(color: Colors.white.withOpacity(0.06), borderRadius: BorderRadius.circular(8)),
+                    child: Icon(Icons.close_rounded, color: Colors.white.withOpacity(0.5), size: 18),
                   ),
                 ),
               ],
             ),
           ),
-
-          // Scrollable content area
           Expanded(
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 250),
@@ -285,7 +290,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 key: ValueKey(_selectedNavIndex),
                 physics: const BouncingScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(28, 8, 28, 28),
-                child: _buildPageContent(),
+                child: _isLoading ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryRed)) : _buildPageContent(),
               ),
             ),
           ),
@@ -296,22 +301,14 @@ class _SettingsDialogState extends State<_SettingsDialog> {
 
   Widget _buildPageContent() {
     switch (_selectedNavIndex) {
-      case 0:
-        return _buildGeneralPage();
-      case 1:
-        return _buildAccountPage();
-      case 2:
-        return _buildPrivacyPage();
-      case 3:
-        return _buildBillingPage();
-      case 4:
-        return _buildCapabilitiesPage();
-      case 5:
-        return _buildConnectorsPage();
-      case 6:
-        return _buildAdvancedPage();
-      default:
-        return _buildGeneralPage();
+      case 0: return _buildGeneralPage();
+      case 1: return _buildAccountPage();
+      case 2: return _buildPrivacyPage();
+      case 3: return _buildBillingPage();
+      case 4: return _buildCapabilitiesPage();
+      case 5: return _buildConnectorsPage();
+      case 6: return _buildAdvancedPage();
+      default: return _buildGeneralPage();
     }
   }
 
@@ -319,204 +316,88 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // --- Profile Section ---
         _sectionTitle('Profile'),
         const SizedBox(height: 16),
 
-        // Avatar row
+        // Avatar Row - Now using real avatar_url from Supabase
         _settingsRow(
           label: 'Avatar',
-          trailing: Container(
-            height: 36,
-            width: 36,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: LinearGradient(
-                colors: [_themeColors[_selectedColorIndex], _themeColors[_selectedColorIndex].withOpacity(0.5)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
+          trailing: GestureDetector(
+            onTap: () {
+              // This would typically open the ImagePicker and upload to Supabase Storage
+            },
+            child: Container(
+              height: 36, width: 36,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(colors: [_themeColors[_selectedColorIndex], _themeColors[_selectedColorIndex].withOpacity(0.5)]),
+                border: Border.all(color: Colors.white24),
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: _themeColors[_selectedColorIndex].withOpacity(0.25),
-                  blurRadius: 10,
-                ),
-              ],
-            ),
-            child: Center(
-              child: Text(
-                'JD',
-                style: GoogleFonts.outfit(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+              child: ClipOval(
+                child: _userProfile?['avatar_url'] != null
+                    ? Image.network(_userProfile!['avatar_url'], fit: BoxFit.cover)
+                    : Center(child: Text(_userProfile?['full_name']?[0] ?? 'U', style: GoogleFonts.outfit(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold))),
               ),
             ),
           ),
         ),
-
         _divider(),
 
-        // Full name
+        // Full name - Editable
         _settingsRow(
           label: 'Full name',
-          trailing: _pillValue('John Doe'),
-        ),
-
-        _divider(),
-
-        // What should we call you?
-        _settingsRow(
-          label: 'Display name',
-          trailing: _pillValue('John Doe'),
-        ),
-
-        _divider(),
-
-        // What best describes your work?
-        _settingsRow(
-          label: 'What best describes your work?',
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('Developer', style: GoogleFonts.outfit(color: Colors.white.withOpacity(0.7), fontSize: 13)),
-              const SizedBox(width: 4),
-              Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white.withOpacity(0.4), size: 18),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 28),
-
-        // --- Instructions ---
-        _sectionTitle('Instructions'),
-        const SizedBox(height: 6),
-        Text(
-          'Custom instructions are remembered across all chats.',
-          style: GoogleFonts.outfit(
-            color: Colors.white.withOpacity(0.35),
-            fontSize: 12,
-          ),
-        ),
-        const SizedBox(height: 10),
-        Container(
-          height: 80,
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.04),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.white.withOpacity(0.07)),
-          ),
-          child: TextField(
-            maxLines: 4,
-            style: GoogleFonts.outfit(color: Colors.white70, fontSize: 13),
-            decoration: InputDecoration(
-              hintText: 'e.g. when learning new concepts, I find analogies particularly helpful.',
-              hintStyle: GoogleFonts.outfit(
-                color: Colors.white.withOpacity(0.2),
-                fontSize: 12.5,
+          trailing: SizedBox(
+            width: 150,
+            child: TextField(
+              controller: _nameController,
+              style: GoogleFonts.outfit(color: Colors.white.withOpacity(0.7), fontSize: 13),
+              textAlign: TextAlign.right,
+              decoration: InputDecoration(
+                border: InputBorder.none,
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.check, size: 16, color: AppTheme.primaryRed),
+                  onPressed: () => _updateFullName(_nameController.text),
+                ),
               ),
-              border: InputBorder.none,
-              contentPadding: const EdgeInsets.all(14),
-              filled: false,
-              enabledBorder: InputBorder.none,
-              focusedBorder: InputBorder.none,
             ),
           ),
         ),
+        _divider(),
+
+        _settingsRow(
+          label: 'Display name',
+          trailing: _pillValue(_userProfile?['full_name'] ?? 'Not set'),
+        ),
 
         const SizedBox(height: 28),
-
-        // --- Preferences Section ---
         _sectionTitle('Preferences'),
         const SizedBox(height: 16),
-
-        // Appearance row with system/light/dark icons
-        _settingsRow(
-          label: 'Appearance',
-          trailing: _buildAppearanceToggle(),
-        ),
-
+        _settingsRow(label: 'Appearance', trailing: _buildAppearanceToggle()),
         _divider(),
-
-        // Chat font
-        _settingsRow(
-          label: 'Chat font',
-          trailing: _buildDropdown(_selectedFont, _fontOptions, (val) {
-            setState(() => _selectedFont = val);
-          }),
-        ),
-
+        _settingsRow(label: 'Chat font', trailing: _buildDropdown(_selectedFont, _fontOptions, (val) => setState(() => _selectedFont = val))),
         _divider(),
-
-        // Motion
-        _settingsRow(
-          label: 'Motion',
-          trailing: _buildDropdown(_selectedMotion, _motionOptions, (val) {
-            setState(() => _selectedMotion = val);
-          }),
-        ),
-
+        _settingsRow(label: 'Theme accent', trailing: _buildColorDots()),
         _divider(),
-
-        // Theme Accent Colors
-        _settingsRow(
-          label: 'Theme accent',
-          trailing: _buildColorDots(),
-        ),
-
-        _divider(),
-
-        // Notifications
-        _settingsRow(
-          label: 'Notifications',
-          trailing: _buildMiniSwitch(_notificationsEnabled, (val) {
-            setState(() => _notificationsEnabled = val);
-          }),
-        ),
-
-        _divider(),
-
-        // Sound
-        _settingsRow(
-          label: 'Sound effects',
-          trailing: _buildMiniSwitch(_soundEnabled, (val) {
-            setState(() => _soundEnabled = val);
-          }),
-        ),
-
-        const SizedBox(height: 16),
+        _settingsRow(label: 'Notifications', trailing: _buildMiniSwitch(_notificationsEnabled, (val) => setState(() => _notificationsEnabled = val))),
       ],
     );
   }
 
   Widget _buildAccountPage() {
+    final user = _supabase.auth.currentUser;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _sectionTitle('Account'),
         const SizedBox(height: 16),
-
         _settingsRow(
           label: 'Email',
-          trailing: Text('john.doe@quantspace.ai',
-              style: GoogleFonts.outfit(color: Colors.white.withOpacity(0.6), fontSize: 13)),
+          trailing: Text(user?.email ?? 'Not available', style: GoogleFonts.outfit(color: Colors.white.withOpacity(0.6), fontSize: 13)),
         ),
         _divider(),
-        _settingsRow(
-          label: 'Password',
-          trailing: _actionButton('Change', () {}),
-        ),
+        _settingsRow(label: 'Password', trailing: _actionButton('Change', () {})),
         _divider(),
-        _settingsRow(
-          label: 'Two-factor authentication',
-          trailing: _actionButton('Enable', () {}),
-        ),
-
-        const SizedBox(height: 32),
-        _sectionTitle('Connected Accounts'),
-        const SizedBox(height: 16),
-        _buildConnectedAccount(Icons.facebook_rounded, 'Facebook', true, const Color(0xFF1877F2)),
-        _divider(),
-        _buildConnectedAccount(Icons.code_rounded, 'GitHub', false, Colors.white70),
-        _divider(),
-        _buildConnectedAccount(Icons.camera_alt_rounded, 'Instagram', false, const Color(0xFFE1306C)),
+        _settingsRow(label: 'Two-factor authentication', trailing: _actionButton('Enable', () {})),
 
         const SizedBox(height: 32),
         _sectionTitle('Danger Zone'),
@@ -525,11 +406,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           label: 'Delete account',
           trailing: _actionButton('Delete', () {}, isDestructive: true),
         ),
-        const SizedBox(height: 16),
       ],
     );
   }
-
 
   Widget _buildPrivacyPage() {
     return Column(
@@ -537,61 +416,27 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       children: [
         _sectionTitle('Privacy & Data'),
         const SizedBox(height: 16),
-
-        _settingsRow(
-          label: 'Data collection',
-          trailing: _buildMiniSwitch(false, (val) {}),
-        ),
+        _settingsRow(label: 'Data collection', trailing: _buildMiniSwitch(false, (val) {})),
         _divider(),
-        _settingsRow(
-          label: 'Analytics',
-          trailing: _buildMiniSwitch(true, (val) {}),
-        ),
-        _divider(),
-        _settingsRow(
-          label: 'Incognito mode',
-          trailing: _buildMiniSwitch(false, (val) {}),
-        ),
-
+        _settingsRow(label: 'Incognito mode', trailing: _buildMiniSwitch(false, (val) {})),
         const SizedBox(height: 28),
         _sectionTitle('Data Management'),
         const SizedBox(height: 16),
-        _settingsRow(
-          label: 'Export your data',
-          trailing: _actionButton('Export', () {}),
-        ),
-        _divider(),
-        _settingsRow(
-          label: 'Clear chat history',
-          trailing: _actionButton('Clear', () {}, isDestructive: true),
-        ),
-        const SizedBox(height: 16),
+        _settingsRow(label: 'Clear chat history', trailing: _actionButton('Clear', () {}, isDestructive: true)),
       ],
     );
   }
 
-  // =======================================================================
-  //  BILLING PAGE
-  // =======================================================================
   Widget _buildBillingPage() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _sectionTitle('Subscription'),
         const SizedBox(height: 16),
-
-        // Current plan card
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                AppTheme.primaryRed.withOpacity(0.12),
-                AppTheme.primaryRed.withOpacity(0.04),
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
+            gradient: LinearGradient(colors: [AppTheme.primaryRed.withOpacity(0.12), AppTheme.primaryRed.withOpacity(0.04)]),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: AppTheme.primaryRed.withOpacity(0.15)),
           ),
@@ -601,11 +446,8 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Free Plan',
-                        style: GoogleFonts.outfit(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 4),
-                    Text('Upgrade for unlimited access',
-                        style: GoogleFonts.outfit(color: Colors.white.withOpacity(0.4), fontSize: 12)),
+                    Text('Free Plan', style: GoogleFonts.outfit(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
+                    Text('Upgrade for unlimited access', style: GoogleFonts.outfit(color: Colors.white.withOpacity(0.4), fontSize: 12)),
                   ],
                 ),
               ),
@@ -613,109 +455,51 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             ],
           ),
         ),
-
-        const SizedBox(height: 24),
-        _settingsRow(
-          label: 'Payment method',
-          trailing: _actionButton('Add card', () {}),
-        ),
-        _divider(),
-        _settingsRow(
-          label: 'Billing history',
-          trailing: _actionButton('View', () {}),
-        ),
-        const SizedBox(height: 16),
       ],
     );
   }
 
-  // =======================================================================
-  //  CAPABILITIES PAGE
-  // =======================================================================
   Widget _buildCapabilitiesPage() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _sectionTitle('AI Capabilities'),
         const SizedBox(height: 16),
-
-        _settingsRow(
-          label: 'Web search',
-          trailing: _buildMiniSwitch(true, (val) {}),
-        ),
+        _settingsRow(label: 'Web search', trailing: _buildMiniSwitch(true, (val) {})),
         _divider(),
-        _settingsRow(
-          label: 'Code execution',
-          trailing: _buildMiniSwitch(true, (val) {}),
-        ),
+        _settingsRow(label: 'Code execution', trailing: _buildMiniSwitch(true, (val) {})),
         _divider(),
-        _settingsRow(
-          label: 'Image generation',
-          trailing: _buildMiniSwitch(false, (val) {}),
-        ),
-        _divider(),
-        _settingsRow(
-          label: 'File uploads',
-          trailing: _buildMiniSwitch(true, (val) {}),
-        ),
-        const SizedBox(height: 16),
+        _settingsRow(label: 'File uploads', trailing: _buildMiniSwitch(true, (val) {})),
       ],
     );
   }
 
-  // =======================================================================
-  //  CONNECTORS PAGE
-  // =======================================================================
   Widget _buildConnectorsPage() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _sectionTitle('Integrations'),
         const SizedBox(height: 16),
-
         _buildConnectedAccount(Icons.storage_rounded, 'Google Drive', true, const Color(0xFF4285F4)),
         _divider(),
         _buildConnectedAccount(Icons.cloud_outlined, 'Dropbox', false, const Color(0xFF0061FF)),
-        _divider(),
-        _buildConnectedAccount(Icons.link_rounded, 'Slack', false, const Color(0xFF4A154B)),
-        _divider(),
-        _buildConnectedAccount(Icons.description_outlined, 'Notion', false, Colors.white70),
-        const SizedBox(height: 16),
       ],
     );
   }
 
-  // =======================================================================
-  //  ADVANCED PAGE
-  // =======================================================================
   Widget _buildAdvancedPage() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _sectionTitle('Advanced Settings'),
         const SizedBox(height: 16),
-
-        _settingsRow(
-          label: 'Developer mode',
-          trailing: _buildMiniSwitch(false, (val) {}),
-        ),
+        _settingsRow(label: 'Developer mode', trailing: _buildMiniSwitch(false, (val) {})),
         _divider(),
-        _settingsRow(
-          label: 'API access',
-          trailing: _actionButton('Generate key', () {}),
-        ),
-        _divider(),
-        _settingsRow(
-          label: 'Debug logging',
-          trailing: _buildMiniSwitch(false, (val) {}),
-        ),
-
+        _settingsRow(label: 'API access', trailing: _actionButton('Generate key', () {})),
         const SizedBox(height: 32),
-
-        // Logout
         Center(
           child: TextButton.icon(
-            onPressed: () {},
+            onPressed: _handleLogout,
             icon: const Icon(Icons.logout_rounded, size: 18),
             label: Text('Log Out', style: GoogleFonts.outfit(fontWeight: FontWeight.w600)),
             style: TextButton.styleFrom(
@@ -728,46 +512,24 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             ),
           ),
         ),
-        const SizedBox(height: 16),
       ],
     );
   }
 
   // =======================================================================
-  //  SHARED BUILDING BLOCKS
+  //  UI HELPERS
   // =======================================================================
 
-  Widget _sectionTitle(String title) {
-    return Text(
-      title,
-      style: GoogleFonts.outfit(
-        color: Colors.white,
-        fontSize: 16,
-        fontWeight: FontWeight.w700,
-      ),
-    );
-  }
+  Widget _sectionTitle(String title) => Text(title, style: GoogleFonts.outfit(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700));
+  Widget _divider() => Divider(color: Colors.white.withOpacity(0.06), height: 1);
 
-  Widget _divider() {
-    return Divider(color: Colors.white.withOpacity(0.06), height: 1);
-  }
-
-  /// A single settings row: label on the left, trailing widget on the right.
   Widget _settingsRow({required String label, required Widget trailing}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 13),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Flexible(
-            child: Text(
-              label,
-              style: GoogleFonts.outfit(
-                color: Colors.white.withOpacity(0.7),
-                fontSize: 13.5,
-              ),
-            ),
-          ),
+          Flexible(child: Text(label, style: GoogleFonts.outfit(color: Colors.white.withOpacity(0.7), fontSize: 13.5))),
           const SizedBox(width: 16),
           trailing,
         ],
@@ -775,37 +537,18 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     );
   }
 
-  /// Dark pill showing a value (e.g. name/email)
-  Widget _pillValue(String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.07),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        text,
-        style: GoogleFonts.outfit(color: Colors.white.withOpacity(0.75), fontSize: 13),
-      ),
-    );
-  }
+  Widget _pillValue(String text) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+    decoration: BoxDecoration(color: Colors.white.withOpacity(0.07), borderRadius: BorderRadius.circular(8)),
+    child: Text(text, style: GoogleFonts.outfit(color: Colors.white.withOpacity(0.75), fontSize: 13)),
+  );
 
-  /// A small action button
-  Widget _actionButton(String label, VoidCallback onTap,
-      {bool isDestructive = false, bool isPrimary = false}) {
+  Widget _actionButton(String label, VoidCallback onTap, {bool isDestructive = false, bool isPrimary = false}) {
     return TextButton(
       onPressed: onTap,
       style: TextButton.styleFrom(
-        backgroundColor: isPrimary
-            ? AppTheme.primaryRed.withOpacity(0.15)
-            : isDestructive
-            ? Colors.redAccent.withOpacity(0.1)
-            : Colors.white.withOpacity(0.06),
-        foregroundColor: isPrimary
-            ? AppTheme.primaryRed
-            : isDestructive
-            ? Colors.redAccent
-            : Colors.white.withOpacity(0.7),
+        backgroundColor: isPrimary ? AppTheme.primaryRed.withOpacity(0.15) : isDestructive ? Colors.redAccent.withOpacity(0.1) : Colors.white.withOpacity(0.06),
+        foregroundColor: isPrimary ? AppTheme.primaryRed : isDestructive ? Colors.redAccent : Colors.white.withOpacity(0.7),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         minimumSize: Size.zero,
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -815,43 +558,23 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     );
   }
 
-  /// Appearance toggle (system / light / dark) matching the image
   Widget _buildAppearanceToggle() {
-    final modes = [
-      {'icon': Icons.laptop_mac_rounded, 'mode': 'system'},
-      {'icon': Icons.light_mode_rounded, 'mode': 'light'},
-      {'icon': Icons.dark_mode_rounded, 'mode': 'dark'},
-    ];
+    final modes = [{'icon': Icons.laptop_mac_rounded, 'mode': 'system'}, {'icon': Icons.light_mode_rounded, 'mode': 'light'}, {'icon': Icons.dark_mode_rounded, 'mode': 'dark'}];
     final selectedMode = _isDarkMode ? 'dark' : 'light';
-
     return Container(
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.06),
-        borderRadius: BorderRadius.circular(10),
-      ),
+      decoration: BoxDecoration(color: Colors.white.withOpacity(0.06), borderRadius: BorderRadius.circular(10)),
       padding: const EdgeInsets.all(3),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: modes.map((m) {
           final isActive = m['mode'] == selectedMode;
           return GestureDetector(
-            onTap: () {
-              setState(() {
-                _isDarkMode = m['mode'] == 'dark' || m['mode'] == 'system';
-              });
-            },
+            onTap: () => setState(() => _isDarkMode = m['mode'] == 'dark' || m['mode'] == 'system'),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: isActive ? Colors.white.withOpacity(0.1) : Colors.transparent,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(
-                m['icon'] as IconData,
-                size: 16,
-                color: isActive ? Colors.white : Colors.white.withOpacity(0.35),
-              ),
+              decoration: BoxDecoration(color: isActive ? Colors.white.withOpacity(0.1) : Colors.transparent, borderRadius: BorderRadius.circular(8)),
+              child: Icon(m['icon'] as IconData, size: 16, color: isActive ? Colors.white : Colors.white.withOpacity(0.35)),
             ),
           );
         }).toList(),
@@ -869,18 +592,11 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             margin: const EdgeInsets.only(left: 7),
-            height: 20,
-            width: 20,
+            height: 20, width: 20,
             decoration: BoxDecoration(
               color: _themeColors[i],
               shape: BoxShape.circle,
-              border: Border.all(
-                color: isSelected ? Colors.white : Colors.transparent,
-                width: 2,
-              ),
-              boxShadow: isSelected
-                  ? [BoxShadow(color: _themeColors[i].withOpacity(0.5), blurRadius: 8, spreadRadius: 1)]
-                  : [],
+              border: Border.all(color: isSelected ? Colors.white : Colors.transparent, width: 2),
             ),
           ),
         );
@@ -888,7 +604,6 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     );
   }
 
-  /// Mini switch (more compact than the default Material switch)
   Widget _buildMiniSwitch(bool value, ValueChanged<bool> onChanged) {
     return SizedBox(
       height: 28,
@@ -896,41 +611,28 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         child: Switch(
           value: value,
           activeColor: AppTheme.primaryRed,
-          activeTrackColor: AppTheme.primaryRed.withOpacity(0.3),
-          inactiveThumbColor: Colors.white38,
-          inactiveTrackColor: Colors.white.withOpacity(0.1),
           onChanged: onChanged,
         ),
       ),
     );
   }
 
-  /// Styled dropdown menu
   Widget _buildDropdown(String value, List<String> items, ValueChanged<String> onChanged) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.06),
-        borderRadius: BorderRadius.circular(8),
-      ),
+      decoration: BoxDecoration(color: Colors.white.withOpacity(0.06), borderRadius: BorderRadius.circular(8)),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
           value: value,
           dropdownColor: const Color(0xFF252525),
-          borderRadius: BorderRadius.circular(12),
-          icon: Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white.withOpacity(0.4), size: 18),
           style: GoogleFonts.outfit(color: Colors.white.withOpacity(0.7), fontSize: 13),
-          isDense: true,
           items: items.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-          onChanged: (val) {
-            if (val != null) onChanged(val);
-          },
+          onChanged: (val) { if (val != null) onChanged(val); },
         ),
       ),
     );
   }
 
-  /// Connected account row
   Widget _buildConnectedAccount(IconData icon, String name, bool connected, Color color) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
@@ -938,12 +640,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         children: [
           Icon(icon, color: color, size: 22),
           const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              name,
-              style: GoogleFonts.outfit(color: Colors.white.withOpacity(0.75), fontSize: 13.5),
-            ),
-          ),
+          Expanded(child: Text(name, style: GoogleFonts.outfit(color: Colors.white.withOpacity(0.75), fontSize: 13.5))),
           _actionButton(connected ? 'Connected' : 'Connect', () {}),
         ],
       ),
@@ -968,7 +665,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
-    // Show popup after frame renders, then pop the route when closed
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await showSettingsPopup(context);
       if (mounted) Navigator.of(context).pop();
@@ -977,7 +673,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Transparent scaffold while the popup is opening
     return const Scaffold(backgroundColor: Colors.transparent);
   }
 }

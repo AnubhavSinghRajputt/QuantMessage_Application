@@ -1,8 +1,6 @@
 // lib/main.dart
 // QuantMessage.Ai
 
-
-
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui';
@@ -18,7 +16,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'core/app_theme.dart';
-import 'core/config.dart' as app_config;
+import 'core/config.dart' as app_config; // FIXED: Alias to avoid 'Config' name conflict
 import 'core/chat_message.dart';
 import 'services/quant_space_api.dart';
 import 'screens/splash_screen.dart';
@@ -33,13 +31,19 @@ import 'screens/animations/animation_effects/infinity_animation.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Environment Variables
+  // 1. Load Environment Variables & Config
+  try {
+    await dotenv.load(fileName: ".env");
+  } catch (e) {
+    debugPrint("Error loading .env file: $e");
+  }
+  // Initialize your custom App Config
   await app_config.Config.init();
 
-  // Initialize Supabase
+  // 2. Initialize Supabase using values from the .env file
   await Supabase.initialize(
-    url: app_config.Config.supabaseUrl,
-    anonKey: app_config.Config.supabaseAnonKey,
+    url: dotenv.env['SUPABASE_URL'] ?? '',
+    anonKey: dotenv.env['SUPABASE_ANON_KEY'] ?? '',
     debug: true,
   );
 
@@ -88,10 +92,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   final List<ChatMessage> _messages = [];
   bool _isTyping = false;
+  String _currentConversationId = ""; // FIXED: Added for DB persistence
 
-  // Note: Flowise Supervisor handles the logic, these are for UI display
-  String _selectedModelName = 'QuantCore 1.0';
-  String _selectedModelId = 'groq/llama-3.1-70b-versatile';
+  // FIXED: Initializing from the app_config class
+  String _selectedModelName = app_config.Config.models[0].name;
+  String _selectedModelId = app_config.Config.models[0].id;
 
   late final AnimationController _inputFocusCtrl;
   late final Animation<double> _inputBorderOpacity;
@@ -101,15 +106,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   late final Animation<double> _emptyOpacity;
   late final Animation<double> _emptyScale;
 
-  final List<Map<String, String>> _aiModels = [
-    {'name': 'QuantCore 1.0', 'id': 'groq/llama-3.1-70b-versatile', 'icon': '⚡'},
-    {'name': 'GPT-4o', 'id': 'openai/gpt-4o', 'icon': '🧠'},
-    {'name': 'Claude 3.5 Sonnet', 'id': 'anthropic/claude-3.5', 'icon': '🎭'},
-  ];
-
   @override
   void initState() {
     super.initState();
+    _generateConversationId();
+
     _inputFocusCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 260));
     _inputBorderOpacity = CurvedAnimation(parent: _inputFocusCtrl, curve: Curves.easeOut);
     _inputFocus.addListener(() => _inputFocus.hasFocus ? _inputFocusCtrl.forward() : _inputFocusCtrl.reverse());
@@ -123,6 +124,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _emptyCtrl.forward();
   }
 
+  // FIXED: Generate a unique ID for the chat session
+  void _generateConversationId() {
+    _currentConversationId = DateTime.now().millisecondsSinceEpoch.toString();
+  }
+
   @override
   void dispose() {
     _controller.dispose();
@@ -134,7 +140,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  //  AI Integration Logic
+  //  AI Integration Logic (FIXED: Now provides all required parameters to ChatMessage)
   void _handleSend() async {
     final text = _controller.text.trim();
     if (text.isEmpty || _isTyping) return;
@@ -144,31 +150,49 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     _emptyCtrl.reset();
     setState(() {
-      _messages.add(ChatMessage(text: text, isUser: true));
+      // FIXED: Added conversationId, senderId, and createdAt
+      _messages.add(ChatMessage(
+        text: text,
+        isUser: true,
+        conversationId: _currentConversationId,
+        senderId: userId,
+        createdAt: DateTime.now(),
+        modelName: _selectedModelName,
+      ));
       _isTyping = true;
     });
     _controller.clear();
     _scrollToBottom();
 
     try {
-      // Using the new Flowise getAIResponse method
+      // Using the Flowise getAIResponse method
       final response = await _api.getAIResponse(text, userId);
+
+      if (!mounted) return;
       setState(() {
+        // FIXED: Added conversationId, senderId, and createdAt for the AI response
         _messages.add(ChatMessage(
           text: response,
           isUser: false,
+          conversationId: _currentConversationId,
+          senderId: 'agent',
+          createdAt: DateTime.now(),
           modelName: _selectedModelName,
         ));
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _messages.add(ChatMessage(
           text: '🚨 **Error**: Connection failed. ${e.toString()}',
           isUser: false,
+          conversationId: _currentConversationId,
+          senderId: 'system',
+          createdAt: DateTime.now(),
         ));
       });
     } finally {
-      setState(() => _isTyping = false);
+      if (mounted) setState(() => _isTyping = false);
       _scrollToBottom();
     }
   }
@@ -271,7 +295,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   String _getModelIcon(String name) {
     try {
-      return _aiModels.firstWhere((m) => m['name'] == name)['icon'] ?? '⚡';
+      // FIXED: Use the app_config list to get the icon
+      return app_config.Config.models.firstWhere((m) => m.name == name).icon;
     } catch (_) { return '⚡'; }
   }
 
@@ -289,12 +314,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         builder: (context, constraints) {
           return Row(
             children: [
-              // Sidebar: Only visible on Desktop/Tablet
               if (isDesktop)
                 LeftSidebar(
                   onNewChat: () {
                     setState(() {
                       _messages.clear();
+                      _generateConversationId(); // Generate new ID for new chat
                       _emptyCtrl.forward(from: 0.0);
                     });
                   },
@@ -309,7 +334,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         left: 0, right: 0, bottom: 0,
                         child: _buildFloatingInput(),
                       ),
-                    // Responsive Navigation Bar
                     Positioned(
                       bottom: !isDesktop ? 0 : null,
                       top: isDesktop ? 0 : null,
@@ -347,11 +371,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 AnimatedDropdown(
                   backgroundColor: const Color(0xFF2D2D2D),
                   dropdownWidth: 280,
-                  items: _aiModels.map((m) => DropdownMenuItemData(
-                    title: m['name']!,
-                    subtitle: 'Powered by ${m['id']!.split('/').last}',
-                    trailing: Text(m['icon']!, style: const TextStyle(fontSize: 16)),
-                    onTap: () => setState(() { _selectedModelName = m['name']!; _selectedModelId = m['id']!; }),
+                  // FIXED: Using app_config.Config.models for the dropdown
+                  items: app_config.Config.models.map((m) => DropdownMenuItemData(
+                    title: m.name,
+                    subtitle: 'Powered by ${m.id.split('/').last}',
+                    trailing: Text(m.icon, style: const TextStyle(fontSize: 16)),
+                    onTap: () => setState(() { _selectedModelName = m.name; _selectedModelId = m.id; }),
                   )).toList(),
                   child: _ModelChip(name: _selectedModelName, icon: _getModelIcon(_selectedModelName)),
                 ),
@@ -360,7 +385,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             actions: [
               IconButton(icon: const Icon(Icons.history_rounded, color: Colors.white38), onPressed: () {}),
               IconButton(icon: const Icon(Icons.delete_sweep_rounded, color: Colors.white24), onPressed: () {
-                setState(() => _messages.clear());
+                setState(() {
+                  _messages.clear();
+                  _generateConversationId();
+                });
                 _emptyCtrl..reset()..forward();
               }),
               const SizedBox(width: 8),
@@ -508,11 +536,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       AnimatedDropdown(
                         backgroundColor: const Color(0xFF3B3B3B),
                         dropdownWidth: 260,
-                        items: _aiModels.map((m) => DropdownMenuItemData(
-                          title: m['name']!,
-                          subtitle: 'Powered by ${m['id']!.split('/').last}',
-                          trailing: Text(m['icon']!, style: const TextStyle(fontSize: 16)),
-                          onTap: () => setState(() { _selectedModelName = m['name']!; _selectedModelId = m['id']!; }),
+                        // FIXED: Using app_config.Config.models
+                        items: app_config.Config.models.map((m) => DropdownMenuItemData(
+                          title: m.name,
+                          subtitle: 'Powered by ${m.id.split('/').last}',
+                          trailing: Text(m.icon, style: const TextStyle(fontSize: 16)),
+                          onTap: () => setState(() { _selectedModelName = m.name; _selectedModelId = m.id; }),
                         )).toList(),
                         child: _AnimatedHoverDropdownButton(text: _selectedModelName),
                       ),
@@ -696,14 +725,6 @@ class _SuggestionPillState extends State<_SuggestionPill> {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(color: _hovered ? Colors.white.withOpacity(0.1) : const Color(0xFF2F2F2F), borderRadius: BorderRadius.circular(20), border: Border.all(color: _hovered ? Colors.white54 : Colors.white10)),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(widget.icon, color: _hovered ? Colors.white : Colors.white70, size: 16),
-            const SizedBox(width: 6),
-            Text(widget.label, style: GoogleFonts.outfit(color: _hovered ? Colors.white : Colors.white70, fontSize: 13, fontWeight: FontWeight.w500)),
-          ],
-        ),
       ),
     );
   }

@@ -1,6 +1,6 @@
 // lib/screens/chat_screen.dart
 // QuantMessage Chat Screen
-// Integrated with Flowise AI and Supabase Auth/Storage
+// Integrated with Flowise AI, Supabase Auth, Storage, and History Persistence
 
 import 'dart:async';
 import 'dart:io' show File;
@@ -10,7 +10,6 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -19,63 +18,43 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/app_theme.dart';
 import '../core/chat_message.dart';
 import '../core/attachment_model.dart';
+import '../core/config.dart' as app_config; // FIXED: Added alias 'app_config' to solve the Config name conflict
 import '../services/quant_space_api.dart';
+import '../services/upload_service.dart';
 import 'animations/animation_effects/infinity_animation.dart';
 import 'sidebar_panel/left_sidebar.dart';
 import 'widgets/attachment_preview.dart';
 import 'widgets/attachment_thumbnail.dart';
 import 'widgets/attachment_picker_sheet.dart';
 
-// Fade-in animation widget
+// --- Animation Helper Widgets ---
 class FadeInAnimation extends StatefulWidget {
   final Widget child;
   final Duration duration;
   final Duration? delay;
   final Curve curve;
-  const FadeInAnimation({
-    Key? key,
-    required this.child,
-    this.duration = const Duration(milliseconds: 500),
-    this.delay,
-    this.curve = Curves.easeIn,
-  }) : super(key: key);
-
+  const FadeInAnimation({Key? key, required this.child, this.duration = const Duration(milliseconds: 500), this.delay, this.curve = Curves.easeIn}) : super(key: key);
   @override
   State<FadeInAnimation> createState() => _FadeInAnimationState();
 }
 
-class _FadeInAnimationState extends State<FadeInAnimation>
-    with SingleTickerProviderStateMixin {
+class _FadeInAnimationState extends State<FadeInAnimation> with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final Animation<double> _opacityAnimation;
-
   @override
   void initState() {
     super.initState();
     _controller = AnimationController(vsync: this, duration: widget.duration);
     final curve = CurvedAnimation(parent: _controller, curve: widget.curve);
     _opacityAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(curve);
-    if (widget.delay != null) {
-      Future.delayed(widget.delay!, _controller.forward);
-    } else {
-      _controller.forward();
-    }
+    if (widget.delay != null) { Future.delayed(widget.delay!, _controller.forward); } else { _controller.forward(); }
   }
-
   @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
+  void dispose() { _controller.dispose(); super.dispose(); }
   @override
-  Widget build(BuildContext context) => FadeTransition(
-    opacity: _opacityAnimation,
-    child: widget.child,
-  );
+  Widget build(BuildContext context) => FadeTransition(opacity: _opacityAnimation, child: widget.child);
 }
 
-// Typing-text animation widget
 class TypingText extends StatefulWidget {
   final String text;
   final TextStyle? style;
@@ -84,17 +63,7 @@ class TypingText extends StatefulWidget {
   final bool showCursor;
   final VoidCallback? onComplete;
   final Duration delayBeforeStart;
-  const TypingText({
-    super.key,
-    required this.text,
-    this.style,
-    this.typingSpeed = const Duration(milliseconds: 20),
-    this.cursorSpeed = const Duration(milliseconds: 500),
-    this.showCursor = true,
-    this.onComplete,
-    this.delayBeforeStart = Duration.zero,
-  });
-
+  const TypingText({super.key, required this.text, this.style, this.typingSpeed = const Duration(milliseconds: 20), this.cursorSpeed = const Duration(milliseconds: 500), this.showCursor = true, this.onComplete, this.delayBeforeStart = Duration.zero});
   @override
   State<TypingText> createState() => _TypingTextState();
 }
@@ -105,63 +74,41 @@ class _TypingTextState extends State<TypingText> {
   bool _cursorVisible = true;
   Timer? _typingTimer;
   Timer? _cursorTimer;
-
   @override
   void initState() {
     super.initState();
     _startAnimation();
     _startCursorBlink();
   }
-
   void _startAnimation() {
     Future.delayed(widget.delayBeforeStart, () {
       if (!mounted) return;
       _typingTimer = Timer.periodic(widget.typingSpeed, (timer) {
         if (_currentIndex < widget.text.length) {
-          setState(() {
-            _displayedText += widget.text[_currentIndex];
-            _currentIndex++;
-          });
-        } else {
-          timer.cancel();
-          if (widget.onComplete != null) widget.onComplete!();
-        }
+          setState(() { _displayedText += widget.text[_currentIndex]; _currentIndex++; });
+        } else { timer.cancel(); if (widget.onComplete != null) widget.onComplete!(); }
       });
     });
   }
-
   void _startCursorBlink() {
     _cursorTimer = Timer.periodic(widget.cursorSpeed, (timer) {
       if (mounted) setState(() => _cursorVisible = !_cursorVisible);
     });
   }
-
   @override
-  void dispose() {
-    _typingTimer?.cancel();
-    _cursorTimer?.cancel();
-    super.dispose();
-  }
-
+  void dispose() { _typingTimer?.cancel(); _cursorTimer?.cancel(); super.dispose(); }
   @override
   Widget build(BuildContext context) {
     return RichText(
       text: TextSpan(
         children: [
-          TextSpan(
-            text: _displayedText,
-            style: widget.style ?? DefaultTextStyle.of(context).style,
-          ),
+          TextSpan(text: _displayedText, style: widget.style ?? DefaultTextStyle.of(context).style),
           if (widget.showCursor)
             WidgetSpan(
               child: AnimatedOpacity(
                 duration: const Duration(milliseconds: 200),
                 opacity: _cursorVisible ? 1.0 : 0.0,
-                child: Container(
-                  width: 2,
-                  height: (widget.style?.fontSize ?? 14) * 1.2,
-                  color: widget.style?.color ?? Colors.black,
-                ),
+                child: Container(width: 2, height: (widget.style?.fontSize ?? 14) * 1.2, color: widget.style?.color ?? Colors.black),
               ),
             ),
         ],
@@ -170,7 +117,9 @@ class _TypingTextState extends State<TypingText> {
   }
 }
 
-// Main Chat Screen
+// ──────────────────────────────────────────────────────────────────────────
+// MAIN CHAT SCREEN
+// ──────────────────────────────────────────────────────────────────────────
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
   @override
@@ -178,28 +127,27 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
-  // Supabase user data
-  User? get _currentUser => Supabase.instance.client.auth.currentUser;
-  String? get _userEmail => _currentUser?.email;
-  String? get _userName =>
-      _currentUser?.userMetadata?['full_name'] as String? ??
-          _currentUser?.email?.split('@').first;
+  final SupabaseClient _supabase = Supabase.instance.client;
 
-  // Controllers and API services
+  User? get _currentUser => _supabase.auth.currentUser;
+  String? get _userEmail => _currentUser?.email;
+  String? get _userName => _currentUser?.userMetadata?['full_name'] as String? ?? _currentUser?.email?.split('@').first;
+
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final QuantSpaceApi _api = QuantSpaceApi();
+  final UploadService _uploadService = UploadService();
   final FocusNode _inputFocus = FocusNode();
 
-  // State management
   final List<ChatMessage> _messages = [];
   bool _isTyping = false;
   final List<Attachment> _pendingAttachments = [];
+  String _currentConversationId = "";
 
-  String _selectedModelName = 'QuantCore 1.0';
-  String _selectedModelId = 'groq/llama-3.1-70b-versatile';
+  // FIXED: Using app_config alias to avoid conflict with google_fonts
+  String _selectedModelName = app_config.Config.models[0].name;
+  String _selectedModelId = app_config.Config.models[0].id;
 
-  // UI Animations
   late final AnimationController _inputFocusCtrl;
   late final Animation<double> _inputGlow;
   late final AnimationController _sendBtnCtrl;
@@ -208,38 +156,26 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   late final Animation<double> _emptyOpacity;
   late final Animation<double> _emptyScale;
 
-  final List<Map<String, String>> _aiModels = [
-    {'name': 'QuantCore 1.0', 'id': 'groq/llama-3.1-70b-versatile', 'icon': '⚡'},
-    {'name': 'GPT-4o', 'id': 'openai/gpt-4o', 'icon': '🧠'},
-    {'name': 'Claude 3.5 Sonnet', 'id': 'anthropic/claude-3.5', 'icon': '🎭'},
-  ];
-
   @override
   void initState() {
     super.initState();
+    _generateConversationId();
 
-    _inputFocusCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 260));
+    _inputFocusCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 260));
     _inputGlow = CurvedAnimation(parent: _inputFocusCtrl, curve: Curves.easeOut);
-    _inputFocus.addListener(() {
-      _inputFocus.hasFocus
-          ? _inputFocusCtrl.forward()
-          : _inputFocusCtrl.reverse();
-    });
+    _inputFocus.addListener(() => _inputFocus.hasFocus ? _inputFocusCtrl.forward() : _inputFocusCtrl.reverse());
 
-    _sendBtnCtrl = AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 110),
-        lowerBound: 0.0,
-        upperBound: 1.0);
-    _sendBtnScale = Tween<double>(begin: 1.0, end: 0.86).animate(
-        CurvedAnimation(parent: _sendBtnCtrl, curve: Curves.easeInOut));
+    _sendBtnCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 110), lowerBound: 0.0, upperBound: 1.0);
+    _sendBtnScale = Tween<double>(begin: 1.0, end: 0.86).animate(CurvedAnimation(parent: _sendBtnCtrl, curve: Curves.easeInOut));
 
     _emptyCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 650));
     _emptyOpacity = CurvedAnimation(parent: _emptyCtrl, curve: Curves.easeOut);
-    _emptyScale = Tween<double>(begin: 0.96, end: 1.0).animate(
-        CurvedAnimation(parent: _emptyCtrl, curve: Curves.easeOutBack));
+    _emptyScale = Tween<double>(begin: 0.96, end: 1.0).animate(CurvedAnimation(parent: _emptyCtrl, curve: Curves.easeOutBack));
     _emptyCtrl.forward();
+  }
+
+  void _generateConversationId() {
+    _currentConversationId = DateTime.now().millisecondsSinceEpoch.toString();
   }
 
   @override
@@ -253,51 +189,27 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  // Sign-out handler
   Future<void> _handleSignOut() async {
-    try {
-      await Supabase.instance.client.auth.signOut();
-      if (!mounted) return;
-      Navigator.of(context).pushNamedAndRemoveUntil('/signin', (route) => false);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Sign out failed: $e'),
-          backgroundColor: Colors.red.shade700,
-        ),
-      );
-    }
+    await _supabase.auth.signOut();
+    if (!mounted) return;
+    Navigator.of(context).pushNamedAndRemoveUntil('/signin', (route) => false);
   }
 
-  // Attachment handlers
+  // ──────────────────────────────────────────────────────────────────────────
+  // ATTACHMENT LOGIC
+  // ──────────────────────────────────────────────────────────────────────────
+
   void _addAttachment(Uint8List bytes, String filename, String mimeType) {
-    final attachment = Attachment(
-      filename: filename,
-      type: _typeFromMime(mimeType),
-      mimeType: mimeType,
-      sizeBytes: bytes.length,
-      status: UploadStatus.pending,
-    );
-
+    // FIXED: Using AttachmentX.fromBytes (Extension method) to resolve a l la "method not defined" error
+    final attachment = AttachmentX.fromBytes(bytes, filename, mimeType);
     setState(() => _pendingAttachments.add(attachment));
-
     _writeTempFile(bytes, filename).then((file) {
       if (!mounted || file == null) return;
       setState(() {
         final idx = _pendingAttachments.indexWhere((a) => a.filename == filename);
-        if (idx != -1) {
-          _pendingAttachments[idx] = _pendingAttachments[idx].copyWith(localFile: file);
-        }
+        if (idx != -1) _pendingAttachments[idx] = _pendingAttachments[idx].copyWith(localFile: file);
       });
     });
-  }
-
-  AttachmentType _typeFromMime(String mime) {
-    if (mime.startsWith('image/')) return AttachmentType.image;
-    if (mime == 'application/pdf') return AttachmentType.pdf;
-    if (mime.startsWith('text/')) return AttachmentType.text;
-    return AttachmentType.unknown;
   }
 
   Future<File?> _writeTempFile(Uint8List bytes, String filename) async {
@@ -306,9 +218,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       final tempFile = File(p.join(dir.path, filename));
       await tempFile.writeAsBytes(bytes, flush: true);
       return tempFile;
-    } catch (_) {
-      return null;
-    }
+    } catch (_) { return null; }
   }
 
   Future<void> _onAttachmentButtonPressed() async {
@@ -319,25 +229,33 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     setState(() => _pendingAttachments.removeAt(index));
   }
 
-  // Main Send Logic integrated with Flowise and Supabase Storage
+  // ──────────────────────────────────────────────────────────────────────────
+  // CORE SEND LOGIC (Synchronized with ChatMessage required parameters)
+  // ──────────────────────────────────────────────────────────────────────────
+
   Future<void> _handleSend() async {
     final text = _controller.text.trim();
     final hasAttachments = _pendingAttachments.isNotEmpty;
     if ((text.isEmpty && !hasAttachments) || _isTyping) return;
 
-    // Use Supabase User ID as session ID for AI memory
-    final userId = Supabase.instance.client.auth.currentUser?.id ?? "guest_user";
-    final conversationId = DateTime.now().millisecondsSinceEpoch.toString();
+    final userId = _currentUser?.id ?? "guest_user";
 
     _emptyCtrl.reset();
-
     final pendingSnapshot = List<Attachment>.from(_pendingAttachments);
+
+    // FIXED: Provide conversationId, senderId, and createdAt to avoid ChatMessage errors
+    final userMsg = ChatMessage(
+      text: text,
+      isUser: true,
+      conversationId: _currentConversationId,
+      senderId: userId,
+      createdAt: DateTime.now(),
+      attachments: pendingSnapshot,
+      modelName: _selectedModelName,
+    );
+
     setState(() {
-      _messages.add(ChatMessage(
-        text: text,
-        isUser: true,
-        attachments: pendingSnapshot,
-      ));
+      _messages.add(userMsg);
       _isTyping = true;
       _pendingAttachments.clear();
     });
@@ -347,33 +265,48 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     try {
       String finalPrompt = text;
 
-      // Upload pending files to Supabase Storage first and append URLs to prompt
       for (final att in pendingSnapshot) {
         if (att.localFile != null) {
-          final uploadRes = await _api.uploadFile(att.localFile!.path, conversationId: conversationId);
-          if (uploadRes['status'] == 'success') {
-            final url = uploadRes['url'];
-            finalPrompt += "\n[Attachment: $url]";
-          }
+          final uploaded = await _uploadService.uploadFile(
+            file: att.localFile!,
+            conversationId: _currentConversationId,
+          );
+          // Use the promptFragment getter from attachment_model.dart
+          finalPrompt += uploaded.promptFragment;
         }
       }
 
-      // Call the Flowise Multi-Agent API
+      // Save User Message to DB
+      await _supabase.from('chat_messages').insert(userMsg.toMap());
+
+      // AI Response
       final response = await _api.getAIResponse(finalPrompt, userId);
+
+      // FIXED: Provide all required fields for the AI ChatMessage
+      final aiMsg = ChatMessage(
+        text: response,
+        isUser: false,
+        conversationId: _currentConversationId,
+        senderId: 'agent',
+        createdAt: DateTime.now(),
+        modelName: _selectedModelName,
+      );
+
+      // Save AI Response to DB
+      await _supabase.from('chat_messages').insert(aiMsg.toMap());
 
       if (!mounted) return;
       setState(() {
-        _messages.add(ChatMessage(
-          text: response,
-          isUser: false,
-          modelName: _selectedModelName,
-        ));
+        _messages.add(aiMsg);
       });
     } catch (e) {
       if (!mounted) return;
       setState(() => _messages.add(ChatMessage(
         text: "🚨 Error: ${e.toString()}",
         isUser: false,
+        conversationId: _currentConversationId,
+        senderId: 'system',
+        createdAt: DateTime.now(),
       )));
     } finally {
       if (mounted) setState(() => _isTyping = false);
@@ -384,11 +317,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   void _scrollToBottom() {
     Future.delayed(const Duration(milliseconds: 100), () {
       if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 480),
-          curve: Curves.easeOutCubic,
-        );
+        _scrollController.animateTo(_scrollController.position.maxScrollExtent, duration: const Duration(milliseconds: 480), curve: Curves.easeOutCubic);
       }
     });
   }
@@ -404,6 +333,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               setState(() {
                 _messages.clear();
                 _pendingAttachments.clear();
+                _generateConversationId();
                 _emptyCtrl.forward(from: 0.0);
               });
             },
@@ -423,7 +353,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                           scale: _emptyScale,
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
                               _buildGreeting(),
                               const SizedBox(height: 40),
@@ -442,10 +371,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                       Expanded(child: _buildChatThread()),
                       Padding(
                         padding: const EdgeInsets.only(bottom: 20, left: 20, right: 20),
-                        child: Align(
-                          alignment: Alignment.bottomCenter,
-                          child: _buildInputBox(),
-                        ),
+                        child: Align(alignment: Alignment.bottomCenter, child: _buildInputBox()),
                       ),
                     ],
                   ),
@@ -464,50 +390,18 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            SizedBox(
-              width: 90,
-              height: 46,
-              child: InfinityAnimation(
-                size: 90,
-                color: const Color(0xFFE27457),
-                duration: const Duration(seconds: 5),
-              ),
-            ),
+            SizedBox(width: 90, height: 46, child: InfinityAnimation(size: 90, color: const Color(0xFFE27457), duration: const Duration(seconds: 5))),
             const SizedBox(width: 16),
             Flexible(
-              child: Text(
-                "< Welcome $userName >",
-                style: GoogleFonts.outfit(
-                  color: const Color(0xFFE8E8E8),
-                  fontSize: 56,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: -0.5,
-                ),
-                textAlign: TextAlign.center,
-                overflow: TextOverflow.ellipsis,
-              ),
+              child: Text("< Welcome $userName >", style: GoogleFonts.outfit(color: const Color(0xFFE8E8E8), fontSize: 56, fontWeight: FontWeight.w900, letterSpacing: -0.5), textAlign: TextAlign.center, overflow: TextOverflow.ellipsis),
             ),
           ],
         ),
         const SizedBox(height: 12),
-        Text(
-          "< How May You be Helped >",
-          textAlign: TextAlign.center,
-          style: GoogleFonts.outfit(
-            color: AppTheme.textSecondary.withOpacity(0.5),
-            fontSize: 18,
-            fontWeight: FontWeight.w300,
-          ),
-        ),
+        Text("< How May You be Helped >", textAlign: TextAlign.center, style: GoogleFonts.outfit(color: AppTheme.textSecondary.withOpacity(0.5), fontSize: 18, fontWeight: FontWeight.w300)),
         if (_userEmail != null) ...[
           const SizedBox(height: 8),
-          Text(
-            "Signed in as $_userEmail",
-            style: GoogleFonts.outfit(
-              color: Colors.white24,
-              fontSize: 12,
-            ),
-          ),
+          Text("Signed in as $_userEmail", style: GoogleFonts.outfit(color: Colors.white24, fontSize: 12)),
         ],
       ],
     );
@@ -541,13 +435,8 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
   Widget _buildAvatar(String icon, Color color) {
     return Container(
-      height: 32,
-      width: 32,
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
+      height: 32, width: 32,
+      decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(8), border: Border.all(color: color.withOpacity(0.3))),
       child: Center(child: Text(icon, style: const TextStyle(fontSize: 14))),
     );
   }
@@ -560,17 +449,8 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         decoration: BoxDecoration(
           color: const Color(0xFF2F2F2F),
           borderRadius: BorderRadius.circular(24),
-          border: Border.all(
-            color: Color.lerp(Colors.white10, Colors.white24, _inputGlow.value)!,
-            width: 1.0,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.2),
-              blurRadius: 15,
-              offset: const Offset(0, 8),
-            )
-          ],
+          border: Border.all(color: Color.lerp(Colors.white10, Colors.white24, _inputGlow.value)!, width: 1.0),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 15, offset: const Offset(0, 8))],
         ),
         child: child,
       ),
@@ -580,25 +460,17 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (_pendingAttachments.isNotEmpty)
-              AttachmentPreviewStrip(
-                attachments: _pendingAttachments,
-                onRemove: _removePendingAttachment,
-              ),
+              AttachmentPreviewStrip(attachments: _pendingAttachments, onRemove: _removePendingAttachment),
             TextField(
               controller: _controller,
               focusNode: _inputFocus,
-              maxLines: 4,
-              minLines: 1,
+              maxLines: 4, minLines: 1,
               style: GoogleFonts.outfit(color: Colors.white, fontSize: 16),
               decoration: InputDecoration(
-                hintText: _pendingAttachments.isNotEmpty
-                    ? "Describe what you want to know about the file(s)..."
-                    : "Type a message...",
-                hintStyle: GoogleFonts.outfit(
-                    color: Colors.white38, fontSize: 16),
+                hintText: _pendingAttachments.isNotEmpty ? "Describe files..." : "Type a message...",
+                hintStyle: GoogleFonts.outfit(color: Colors.white38, fontSize: 16),
                 border: InputBorder.none,
-                contentPadding:
-                const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
               ),
               onSubmitted: (_) => _handleSend(),
             ),
@@ -611,28 +483,20 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    _AnimatedHoverIcon(
-                      icon: Icons.add,
-                      onTap: _onAttachmentButtonPressed,
-                    ),
+                    _AnimatedHoverIcon(icon: Icons.add, onTap: _onAttachmentButtonPressed),
                     const SizedBox(width: 8),
                     AnimatedDropdown(
                       backgroundColor: const Color(0xFF3B3B3B),
                       dropdownWidth: 260,
-                      items: _aiModels.map((model) {
+                      items: app_config.Config.models.map((model) {
                         return DropdownMenuItemData(
-                          title: model['name']!,
-                          subtitle: "Powered by ${model['id']!.split('/').last}",
-                          trailing: Text(model['icon']!,
-                              style: const TextStyle(fontSize: 16)),
-                          onTap: () => setState(() {
-                            _selectedModelName = model['name']!;
-                            _selectedModelId = model['id']!;
-                          }),
+                          title: model.name,
+                          subtitle: "Powered by ${model.id.split('/').last}",
+                          trailing: Text(model.icon, style: const TextStyle(fontSize: 16)),
+                          onTap: () => setState(() { _selectedModelName = model.name; _selectedModelId = model.id; }),
                         );
                       }).toList(),
-                      child: _AnimatedHoverDropdownButton(
-                          text: _selectedModelName),
+                      child: _AnimatedHoverDropdownButton(text: _selectedModelName),
                     ),
                     const SizedBox(width: 8),
                     _AnimatedHoverIcon(icon: Icons.mic_none, onTap: () {}),
@@ -641,21 +505,12 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                     const SizedBox(width: 12),
                     GestureDetector(
                       onTapDown: (_) => _sendBtnCtrl.forward(),
-                      onTapUp: (_) async {
-                        await _sendBtnCtrl.reverse();
-                        _handleSend();
-                      },
+                      onTapUp: (_) async { await _sendBtnCtrl.reverse(); _handleSend(); },
                       onTapCancel: () => _sendBtnCtrl.reverse(),
-                      child: ScaleTransition(
-                        scale: _sendBtnScale,
-                        child: _AnimatedHoverSendButton(onTap: () {  },),
-                      ),
+                      child: ScaleTransition(scale: _sendBtnScale, child: _AnimatedHoverSendButton(onTap: () {})),
                     ),
                     const SizedBox(width: 8),
-                    _AnimatedHoverIcon(
-                      icon: Icons.logout_rounded,
-                      onTap: _handleSignOut,
-                    ),
+                    _AnimatedHoverIcon(icon: Icons.logout_rounded, onTap: _handleSignOut),
                   ],
                 ),
               ),
@@ -668,9 +523,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
   Widget _buildSuggestionPills() {
     return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      alignment: WrapAlignment.center,
+      spacing: 8, runSpacing: 8, alignment: WrapAlignment.center,
       children: const [
         _SuggestionPill(Icons.edit_outlined, "Write"),
         _SuggestionPill(Icons.school_outlined, "Learn"),
@@ -682,7 +535,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   }
 }
 
-// Animated Message Row
+// ──────────────────────────────────────────────────────────────────────────
+// MESSAGE ROW & AI CONTENT
+// ──────────────────────────────────────────────────────────────────────────
 class _AnimatedMessageRow extends StatefulWidget {
   final ChatMessage message;
   const _AnimatedMessageRow({required this.message});
@@ -697,18 +552,13 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow> {
   @override
   Widget build(BuildContext context) {
     final msg = widget.message;
-    final hasAttachments = msg.hasAttachments;
-    final hasText = msg.hasText;
-
     return FadeInAnimation(
       duration: const Duration(milliseconds: 400),
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 20),
         decoration: BoxDecoration(
-          color: msg.isUser
-              ? Colors.transparent
-              : AppTheme.surfaceDark.withOpacity(0.3),
+          color: msg.isUser ? Colors.transparent : AppTheme.surfaceDark.withOpacity(0.3),
           border: const Border(bottom: BorderSide(color: Colors.white12)),
         ),
         child: Row(
@@ -724,23 +574,14 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    msg.isUser ? "USER" : msg.modelName.toUpperCase(),
-                    style: GoogleFonts.jetBrainsMono(fontSize: 10, color: Colors.white38),
-                  ),
+                  Text(msg.isUser ? "USER" : msg.modelName.toUpperCase(), style: GoogleFonts.jetBrainsMono(fontSize: 10, color: Colors.white38)),
                   const SizedBox(height: 5),
-                  if (hasAttachments)
-                    AttachmentList(attachments: msg.attachments),
-                  if (hasText)
+                  if (msg.hasAttachments) AttachmentList(attachments: msg.attachments),
+                  if (msg.hasText)
                     ConstrainedBox(
-                      constraints: BoxConstraints(
-                          maxWidth: MediaQuery.of(context).size.width * 0.8),
+                      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.8),
                       child: msg.isUser
-                          ? MarkdownBody(
-                        data: msg.text,
-                        styleSheet: MarkdownStyleSheet(
-                            p: GoogleFonts.outfit(color: Colors.white, fontSize: 15)),
-                      )
+                          ? MarkdownBody(data: msg.text, styleSheet: MarkdownStyleSheet(p: GoogleFonts.outfit(color: Colors.white, fontSize: 15)))
                           : _buildAIContent(),
                     ),
                 ],
@@ -754,22 +595,16 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow> {
 
   Widget _buildAIContent() {
     return _isTypingComplete
-        ? MarkdownBody(
-      data: widget.message.text,
-      styleSheet: MarkdownStyleSheet(
-          p: GoogleFonts.outfit(color: Colors.white, fontSize: 15)),
-    )
+        ? MarkdownBody(data: widget.message.text, styleSheet: MarkdownStyleSheet(p: GoogleFonts.outfit(color: Colors.white, fontSize: 15)))
         : TypingText(
       text: widget.message.text,
       style: GoogleFonts.outfit(color: Colors.white, fontSize: 15),
-      onComplete: () {
-        if (mounted) setState(() => _isTypingComplete = true);
-      },
+      onComplete: () => setState(() => _isTypingComplete = true),
     );
   }
 }
 
-// Helper UI components
+// --- UI Helpers (Retained from Original) ---
 class _SuggestionPill extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -780,21 +615,13 @@ class _SuggestionPill extends StatelessWidget {
     child: AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white10),
-      ),
+      decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.white10)),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, color: Colors.white70, size: 16),
           const SizedBox(width: 6),
-          Text(label,
-              style: GoogleFonts.outfit(
-                  color: Colors.white70,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500)),
+          Text(label, style: GoogleFonts.outfit(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w500)),
         ],
       ),
     ),
@@ -821,16 +648,8 @@ class _AnimatedHoverIconState extends State<_AnimatedHoverIcon> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: _isHovered
-              ? Colors.white.withOpacity(0.05)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Icon(widget.icon,
-            color:
-            _isHovered ? Colors.white : Colors.white70,
-            size: 20),
+        decoration: BoxDecoration(color: _isHovered ? Colors.white.withOpacity(0.05) : Colors.transparent, borderRadius: BorderRadius.circular(8)),
+        child: Icon(widget.icon, color: _isHovered ? Colors.white : Colors.white70, size: 20),
       ),
     ),
   );
@@ -840,12 +659,10 @@ class _AnimatedHoverDropdownButton extends StatefulWidget {
   final String text;
   const _AnimatedHoverDropdownButton({required this.text});
   @override
-  State<_AnimatedHoverDropdownButton> createState() =>
-      _AnimatedHoverDropdownButtonState();
+  State<_AnimatedHoverDropdownButton> createState() => _AnimatedHoverDropdownButtonState();
 }
 
-class _AnimatedHoverDropdownButtonState
-    extends State<_AnimatedHoverDropdownButton> {
+class _AnimatedHoverDropdownButtonState extends State<_AnimatedHoverDropdownButton> {
   bool _isHovered = false;
   @override
   Widget build(BuildContext context) => MouseRegion(
@@ -854,27 +671,14 @@ class _AnimatedHoverDropdownButtonState
     onExit: (_) => setState(() => _isHovered = false),
     child: AnimatedContainer(
       duration: const Duration(milliseconds: 200),
-      padding:
-      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: _isHovered
-            ? Colors.white.withOpacity(0.1)
-            : Colors.transparent,
-        borderRadius: BorderRadius.circular(8),
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(color: _isHovered ? Colors.white.withOpacity(0.1) : Colors.transparent, borderRadius: BorderRadius.circular(8)),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(widget.text,
-              style: GoogleFonts.outfit(
-                  color: _isHovered ? Colors.white : Colors.white70,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500)),
+          Text(widget.text, style: GoogleFonts.outfit(color: _isHovered ? Colors.white : Colors.white70, fontSize: 13, fontWeight: FontWeight.w500)),
           const SizedBox(width: 4),
-          Icon(Icons.keyboard_arrow_down,
-              color:
-              _isHovered ? Colors.white : Colors.white54,
-              size: 16),
+          Icon(Icons.keyboard_arrow_down, color: _isHovered ? Colors.white : Colors.white54, size: 16),
         ],
       ),
     ),
@@ -885,8 +689,7 @@ class _AnimatedHoverSendButton extends StatefulWidget {
   final VoidCallback onTap;
   const _AnimatedHoverSendButton({required this.onTap});
   @override
-  State<_AnimatedHoverSendButton> createState() =>
-      _AnimatedHoverSendButtonState();
+  State<_AnimatedHoverSendButton> createState() => _AnimatedHoverSendButtonState();
 }
 
 class _AnimatedHoverSendButtonState extends State<_AnimatedHoverSendButton> {
@@ -901,13 +704,8 @@ class _AnimatedHoverSendButtonState extends State<_AnimatedHoverSendButton> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: _isHovered ? Colors.white : Colors.white24,
-          shape: BoxShape.circle,
-        ),
-        child: Icon(Icons.arrow_upward_rounded,
-            color: _isHovered ? Colors.black : Colors.white,
-            size: 20),
+        decoration: BoxDecoration(color: _isHovered ? Colors.white : Colors.white24, shape: BoxShape.circle),
+        child: Icon(Icons.arrow_upward_rounded, color: _isHovered ? Colors.black : Colors.white, size: 20),
       ),
     ),
   );
@@ -915,24 +713,14 @@ class _AnimatedHoverSendButtonState extends State<_AnimatedHoverSendButton> {
 
 class _ThinkingDots extends StatelessWidget {
   @override
-  Widget build(BuildContext context) => const Row(
-    children: [
-      Text("...", style: TextStyle(color: Colors.white38, fontSize: 20))
-    ],
-  );
+  Widget build(BuildContext context) => const Row(children: [Text("...", style: TextStyle(color: Colors.white38, fontSize: 20))]);
 }
 
 class _ParticleBackground extends StatelessWidget {
   final int count;
   const _ParticleBackground({required this.count});
   @override
-  Widget build(BuildContext context) => Opacity(
-    opacity: 0.3,
-    child: CustomPaint(
-      painter: _ChatParticlePainter(0.0, count),
-      size: MediaQuery.of(context).size,
-    ),
-  );
+  Widget build(BuildContext context) => Opacity(opacity: 0.3, child: CustomPaint(painter: _ChatParticlePainter(0.0, count), size: MediaQuery.of(context).size));
 }
 
 class _ChatParticlePainter extends CustomPainter {
@@ -943,17 +731,11 @@ class _ChatParticlePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final paint = Paint()..color = Colors.white10;
     for (int i = 0; i < count; i++) {
-      canvas.drawCircle(
-        Offset(math.Random().nextDouble() * size.width,
-            math.Random().nextDouble() * size.height),
-        1.5,
-        paint,
-      );
+      canvas.drawCircle(Offset(math.Random().nextDouble() * size.width, math.Random().nextDouble() * size.height), 1.5, paint);
     }
   }
-
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _ChatParticlePainter oldDelegate) => false;
 }
 
 class AnimatedDropdown extends StatefulWidget {
@@ -961,20 +743,13 @@ class AnimatedDropdown extends StatefulWidget {
   final List<DropdownMenuItemData> items;
   final double dropdownWidth;
   final Color backgroundColor;
-  const AnimatedDropdown({
-    Key? key,
-    required this.child,
-    required this.items,
-    this.dropdownWidth = 300,
-    this.backgroundColor = const Color(0xFF2D2D2D),
-  }) : super(key: key);
+  const AnimatedDropdown({Key? key, required this.child, required this.items, this.dropdownWidth = 300, this.backgroundColor = const Color(0xFF2D2D2D)}) : super(key: key);
 
   @override
   State<AnimatedDropdown> createState() => _AnimatedDropdownState();
 }
 
-class _AnimatedDropdownState extends State<AnimatedDropdown>
-    with SingleTickerProviderStateMixin {
+class _AnimatedDropdownState extends State<AnimatedDropdown> with SingleTickerProviderStateMixin {
   final LayerLink _layerLink = LayerLink();
   OverlayEntry? _overlayEntry;
   bool _isOpen = false;
@@ -984,10 +759,8 @@ class _AnimatedDropdownState extends State<AnimatedDropdown>
   @override
   void initState() {
     super.initState();
-    _animationController = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 300));
-    _expandAnimation = CurvedAnimation(
-        parent: _animationController, curve: Curves.easeOutCubic);
+    _animationController = AnimationController(vsync: this, duration: const Duration(milliseconds: 300));
+    _expandAnimation = CurvedAnimation(parent: _animationController, curve: Curves.easeOutCubic);
   }
 
   @override
@@ -997,24 +770,16 @@ class _AnimatedDropdownState extends State<AnimatedDropdown>
     super.dispose();
   }
 
-  void _toggleDropdown() {
-    _isOpen ? _closeDropdown() : _showDropdown();
-  }
+  void _toggleDropdown() { _isOpen ? _closeDropdown() : _showDropdown(); }
 
   void _showDropdown() {
     if (_overlayEntry != null) return;
     final renderBox = context.findRenderObject() as RenderBox;
     final size = renderBox.size;
-
     _overlayEntry = OverlayEntry(
       builder: (context) => Stack(
         children: [
-          Positioned.fill(
-            child: GestureDetector(
-                behavior: HitTestBehavior.translucent,
-                onTap: _closeDropdown,
-                child: const ColoredBox(color: Colors.transparent)),
-          ),
+          Positioned.fill(child: GestureDetector(behavior: HitTestBehavior.translucent, onTap: _closeDropdown, child: const ColoredBox(color: Colors.transparent))),
           CompositedTransformFollower(
             link: _layerLink,
             offset: Offset(0, size.height + 8),
@@ -1025,18 +790,7 @@ class _AnimatedDropdownState extends State<AnimatedDropdown>
                 axisAlignment: -1.0,
                 child: Container(
                   width: widget.dropdownWidth,
-                  decoration: BoxDecoration(
-                    color: widget.backgroundColor,
-                    borderRadius: BorderRadius.circular(12),
-                    border:
-                    Border.all(color: Colors.white.withOpacity(0.1)),
-                    boxShadow: [
-                      BoxShadow(
-                          color: Colors.black.withOpacity(0.3),
-                          blurRadius: 10,
-                          offset: const Offset(0, 5))
-                    ],
-                  ),
+                  decoration: BoxDecoration(color: widget.backgroundColor, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white.withOpacity(0.1)), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 5))]),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(12),
                     child: ConstrainedBox(
@@ -1046,21 +800,8 @@ class _AnimatedDropdownState extends State<AnimatedDropdown>
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: widget.items.map((item) {
-                            if (item.isDivider) {
-                              return Divider(
-                                height: 1,
-                                color: Colors.white.withOpacity(0.1),
-                                indent: 16,
-                                endIndent: 16,
-                              );
-                            }
-                            return _DropdownItemWidget(
-                              item: item,
-                              onItemTapped: () {
-                                if (item.onTap != null) item.onTap!();
-                                if (item.closeOnTap) _closeDropdown();
-                              },
-                            );
+                            if (item.isDivider) return Divider(height: 1, color: Colors.white.withOpacity(0.1), indent: 16, endIndent: 16);
+                            return _DropdownItemWidget(item: item, onItemTapped: () { if (item.onTap != null) item.onTap!(); if (item.closeOnTap) _closeDropdown(); });
                           }).toList(),
                         ),
                       ),
@@ -1090,10 +831,7 @@ class _AnimatedDropdownState extends State<AnimatedDropdown>
   }
 
   @override
-  Widget build(BuildContext context) => CompositedTransformTarget(
-    link: _layerLink,
-    child: GestureDetector(onTap: _toggleDropdown, child: widget.child),
-  );
+  Widget build(BuildContext context) => CompositedTransformTarget(link: _layerLink, child: GestureDetector(onTap: _toggleDropdown, child: widget.child));
 }
 
 class DropdownMenuItemData {
@@ -1106,27 +844,15 @@ class DropdownMenuItemData {
   final bool isDivider;
   final bool isDisabled;
 
-  const DropdownMenuItemData({
-    this.title = '',
-    this.subtitle,
-    this.trailing,
-    this.titleTrailing,
-    this.onTap,
-    this.closeOnTap = true,
-    this.isDivider = false,
-    this.isDisabled = false,
-  });
+  const DropdownMenuItemData({this.title = '', this.subtitle, this.trailing, this.titleTrailing, this.onTap, this.closeOnTap = true, this.isDivider = false, this.isDisabled = false});
 
-  factory DropdownMenuItemData.divider() =>
-      const DropdownMenuItemData(isDivider: true);
+  factory DropdownMenuItemData.divider() => const DropdownMenuItemData(isDivider: true);
 }
 
 class _DropdownItemWidget extends StatefulWidget {
   final DropdownMenuItemData item;
   final VoidCallback onItemTapped;
-  const _DropdownItemWidget(
-      {Key? key, required this.item, required this.onItemTapped})
-      : super(key: key);
+  const _DropdownItemWidget({Key? key, required this.item, required this.onItemTapped}) : super(key: key);
 
   @override
   State<_DropdownItemWidget> createState() => _DropdownItemWidgetState();
@@ -1136,20 +862,13 @@ class _DropdownItemWidgetState extends State<_DropdownItemWidget> {
   bool _isHovered = false;
   @override
   Widget build(BuildContext context) => MouseRegion(
-    onEnter: (_) {
-      if (!widget.item.isDisabled) setState(() => _isHovered = true);
-    },
-    onExit: (_) {
-      if (!widget.item.isDisabled) setState(() => _isHovered = false);
-    },
-    cursor: widget.item.isDisabled
-        ? SystemMouseCursors.basic
-        : SystemMouseCursors.click,
+    onEnter: (_) { if (!widget.item.isDisabled) setState(() => _isHovered = true); },
+    onExit: (_) { if (!widget.item.isDisabled) setState(() => _isHovered = false); },
+    cursor: widget.item.isDisabled ? SystemMouseCursors.basic : SystemMouseCursors.click,
     child: GestureDetector(
       onTap: widget.item.isDisabled ? null : widget.onItemTapped,
       child: Container(
-        color:
-        _isHovered ? Colors.white.withOpacity(0.05) : Colors.transparent,
+        color: _isHovered ? Colors.white.withOpacity(0.05) : Colors.transparent,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           children: [
@@ -1158,34 +877,14 @@ class _DropdownItemWidgetState extends State<_DropdownItemWidget> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(children: [
-                    Text(widget.item.title,
-                        style: TextStyle(
-                            color: widget.item.isDisabled
-                                ? Colors.white.withOpacity(0.3)
-                                : Colors.white,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600)),
-                    if (widget.item.titleTrailing != null) ...[
-                      const SizedBox(width: 8),
-                      widget.item.titleTrailing!
-                    ],
+                    Text(widget.item.title, style: TextStyle(color: widget.item.isDisabled ? Colors.white.withOpacity(0.3) : Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
+                    if (widget.item.titleTrailing != null) ...[const SizedBox(width: 8), widget.item.titleTrailing!],
                   ]),
-                  if (widget.item.subtitle != null) ...[
-                    const SizedBox(height: 4),
-                    Text(widget.item.subtitle!,
-                        style: TextStyle(
-                            color: widget.item.isDisabled
-                                ? Colors.white.withOpacity(0.3)
-                                : Colors.white.withOpacity(0.5),
-                            fontSize: 13))
-                  ],
+                  if (widget.item.subtitle != null) ...[const SizedBox(height: 4), Text(widget.item.subtitle!, style: TextStyle(color: widget.item.isDisabled ? Colors.white.withOpacity(0.3) : Colors.white.withOpacity(0.5), fontSize: 13))],
                 ],
               ),
             ),
-            if (widget.item.trailing != null) ...[
-              const SizedBox(width: 12),
-              widget.item.trailing!
-            ],
+            if (widget.item.trailing != null) ...[const SizedBox(width: 12), widget.item.trailing!],
           ],
         ),
       ),

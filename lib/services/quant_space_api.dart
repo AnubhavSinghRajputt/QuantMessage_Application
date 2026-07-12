@@ -4,23 +4,20 @@
 // -----------------------------------------------------------------------
 
 import 'dart:convert';
-import 'dart:typed_data';
-import 'dart:io'; // IMPORTED: Needed for File
-import 'package:path/path.dart' as p; // IMPORTED: Needed for filenames
+import 'dart:io';
+import 'package:path/path.dart' as p;
 
 import 'package:dio/dio.dart' as dio_pkg;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-// ── Convenience type aliases ───────
+// ── Convenience type aliases for cleaner code ───────
 typedef _Dio                       = dio_pkg.Dio;
 typedef _BaseOptions               = dio_pkg.BaseOptions;
 typedef _Options                   = dio_pkg.Options;
 typedef _FormData                  = dio_pkg.FormData;
 typedef _DioException              = dio_pkg.DioException;
-typedef _ResponseBody              = dio_pkg.ResponseBody;
-typedef _ResponseType              = dio_pkg.ResponseType;
 typedef _RequestOptions            = dio_pkg.RequestOptions;
 typedef _RequestInterceptorHandler = dio_pkg.RequestInterceptorHandler;
 typedef _ErrorInterceptorHandler   = dio_pkg.ErrorInterceptorHandler;
@@ -28,19 +25,15 @@ typedef _ErrorInterceptorHandler   = dio_pkg.ErrorInterceptorHandler;
 class QuantSpaceApi {
   late final _Dio _dio;
 
-  // Credentials from .env
-  late final String flowiseUrl;
-  late final String flowiseApiKey;
-  late final String supabaseUrl;
+  // Credentials pulled from .env
+  String get flowiseUrl => dotenv.env['FLOWISE_URL'] ?? '';
+  String get flowiseApiKey => dotenv.env['FLOWISE_API_KEY'] ?? '';
+  String get supabaseUrl => dotenv.env['SUPABASE_URL'] ?? '';
 
   QuantSpaceApi() {
-    flowiseUrl = dotenv.env['FLOWISE_URL'] ?? '';
-    flowiseApiKey = dotenv.env['FLOWISE_API_KEY'] ?? '';
-    supabaseUrl = dotenv.env['SUPABASE_URL'] ?? '';
-
     _dio = _Dio(
       _BaseOptions(
-        baseUrl: '',
+        baseUrl: '', // We use full URLs for different endpoints
         headers: {'Content-Type': 'application/json'},
         connectTimeout: const Duration(seconds: 20),
         receiveTimeout: const Duration(seconds: 60),
@@ -48,21 +41,26 @@ class QuantSpaceApi {
       ),
     );
 
+    // Attach the Supabase Auth Interceptor to all Dio requests
     _dio.interceptors.add(_AuthInterceptor());
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  //  CORE FLOWISE INTEGRATION
+  //  CORE AI INTEGRATION (Flowise)
   // ──────────────────────────────────────────────────────────────────────────
 
   Future<String> getAIResponse(String message, String userId) async {
+    if (flowiseUrl.isEmpty) {
+      return "🚨 Configuration Error: FLOWISE_URL is missing in .env file.";
+    }
+
     try {
       final response = await _dio.post(
         flowiseUrl,
         data: {
           "question": message,
           "overrideConfig": {
-            "sessionId": userId,
+            "sessionId": userId, // This ensures the AI remembers the user session
           },
         },
         options: _Options(
@@ -72,6 +70,7 @@ class QuantSpaceApi {
         ),
       );
 
+      // Flowise can return a simple string or a JSON map
       if (response.data is String) {
         return response.data;
       } else if (response.data is Map) {
@@ -81,12 +80,55 @@ class QuantSpaceApi {
       return response.data.toString();
     } on _DioException catch (e) {
       debugPrint('[QuantSpace API] Flowise Error: ${e.response?.data ?? e.message}');
-      return "🚨 AI Error: ${e.message}";
+      return "🚨 AI Error: ${e.message ?? 'Unknown error occurred'}";
+    } catch (e) {
+      debugPrint('[QuantSpace API] Unexpected Error: $e');
+      return "🚨 System Error: $e";
     }
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  //  COMPATIBILITY LAYER
+  //  MULTIMODAL & FILE HANDLING (Supabase Storage)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /// Uploads a file to Supabase Storage and returns the Public URL
+  Future<Map<String, dynamic>> uploadFile(String filePath, {required String conversationId}) async {
+    try {
+      // 1. Extract the filename from the path
+      final fileName = p.basename(filePath);
+
+      // 2. Create a dart:io File object
+      final file = File(filePath);
+
+      // 3. Upload to Supabase Storage
+      // NOTE: Make sure you have created a bucket named 'attachments' in Supabase Dashboard
+      final storage = Supabase.instance.client.storage.from('attachments');
+
+      // We organize files by conversationId to keep the storage clean
+      final path = 'conversations/$conversationId/$fileName';
+
+      await storage.upload(
+        path,
+        file,
+        fileOptions: const FileOptions(upsert: true),
+      );
+
+      // 4. Generate the Public URL to send to the AI model
+      final publicUrl = storage.getPublicUrl(path);
+
+      return {
+        'url': publicUrl,
+        'status': 'success',
+        'message': 'File uploaded successfully',
+      };
+    } catch (e) {
+      debugPrint('[QuantSpace API] Upload Error: $e');
+      return {'status': 'error', 'message': e.toString()};
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  //  COMPATIBILITY LAYER (For older parts of the app)
   // ──────────────────────────────────────────────────────────────────────────
 
   Future<Map<String, dynamic>> chat(String message, {String? model}) async {
@@ -102,48 +144,13 @@ class QuantSpaceApi {
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  //  MULTIMODAL & FILE HANDLING (FIXED)
-  // ──────────────────────────────────────────────────────────────────────────
-
-  /// FIXED: Corrected the MultipartFile error by using dart:io File
-  Future<Map<String, dynamic>> uploadFile(String filePath, {required String conversationId}) async {
-    try {
-      // 1. Extract the filename using the path package
-      final fileName = p.basename(filePath);
-
-      // 2. Create a standard dart:io File object
-      final file = File(filePath);
-
-      // 3. Upload directly to Supabase Storage
-      // The Supabase SDK accepts a File object on mobile platforms
-      final storage = Supabase.instance.client.storage.from('chat-attachments');
-
-      await storage.upload(
-        'attachments/$conversationId/$fileName',
-        file,
-        fileOptions: const FileOptions(upsert: true),
-      );
-
-      // 4. Get the Public URL to send to the AI
-      final publicUrl = storage.getPublicUrl('attachments/$conversationId/$fileName');
-
-      return {
-        'url': publicUrl,
-        'status': 'success',
-        'message': 'File uploaded successfully',
-      };
-    } catch (e) {
-      debugPrint('[QuantSpace API] Upload Error: $e');
-      return {'status': 'error', 'message': e.toString()};
-    }
-  }
-
-  // ──────────────────────────────────────────────────────────────────────────
   //  OTHER UTILITIES
   // ──────────────────────────────────────────────────────────────────────────
 
   Future<String?> generateImage(String prompt) async {
     final response = await getAIResponse("Generate a high-quality AI image: $prompt", "image_session");
+
+    // Regular expression to find Markdown images [alt](url)
     final RegExp urlRegex = RegExp(r'!\[.*?\]\((.*?)\)');
     final Match? match = urlRegex.firstMatch(response);
     return match?.group(1) ?? response;
@@ -157,24 +164,27 @@ class QuantSpaceApi {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Auth Interceptor
+//  Auth Interceptor (Links Supabase Auth to API Requests)
 // ─────────────────────────────────────────────────────────────────────────────
 class _AuthInterceptor extends dio_pkg.Interceptor {
   @override
   void onRequest(_RequestOptions options, _RequestInterceptorHandler handler) {
     try {
+      // Pull the current session from the Supabase singleton initialized in main.dart
       final session = Supabase.instance.client.auth.currentSession;
       if (session?.accessToken != null) {
         options.headers['Authorization'] = 'Bearer ${session!.accessToken}';
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[QuantSpace API] Auth Interceptor Error: $e');
+    }
     handler.next(options);
   }
 
   @override
   void onError(_DioException err, _ErrorInterceptorHandler handler) {
     if (err.response?.statusCode == 401) {
-      debugPrint('[QuantSpace API] 401 Unauthorized');
+      debugPrint('[QuantSpace API] 401 Unauthorized - Session may have expired');
     }
     handler.next(err);
   }
