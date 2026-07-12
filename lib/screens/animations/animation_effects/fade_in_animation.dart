@@ -1,16 +1,9 @@
-// lib/screens/animations/animation_effects/fade_in_animation.dart
-
 import 'package:flutter/material.dart';
 
-
 class FadeInAnimation extends StatefulWidget {
-
   final Widget child;
-
   final Duration duration;
-
   final Duration? delay;
-
   final Curve curve;
 
   const FadeInAnimation({
